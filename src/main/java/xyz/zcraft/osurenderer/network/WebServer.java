@@ -35,7 +35,7 @@ public final class WebServer implements Closeable {
                     .get("/health", context -> {
                         JsonObject response = new JsonObject();
                         response.addProperty("ok", true);
-                        context.json(response);
+                        context.contentType("application/json").result(response.toString());
                     })
                     .post("/cache/status", controller::cacheStatus)
                     .get("/renders/status", controller::overview)
