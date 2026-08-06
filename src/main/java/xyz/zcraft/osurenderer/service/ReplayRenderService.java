@@ -37,6 +37,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import static xyz.zcraft.osurenderer.MiscUtil.deepMergeJson;
+
 public final class ReplayRenderService implements Closeable {
     private static final Logger LOG = LogManager.getLogger(ReplayRenderService.class);
     private static final Logger DANSER_LOG = LogManager.getLogger("danser");
@@ -251,7 +253,19 @@ public final class ReplayRenderService implements Closeable {
         command.add("-record");
 
         String suppliedConfig = Files.readString(request.config(), StandardCharsets.UTF_8);
-        String finalConfig = applySongsPath(suppliedConfig, request.workspace().resolve("songs"));
+        String givenConfig = applySongsPath(suppliedConfig, request.workspace().resolve("songs"));
+
+        JsonObject configObj = JsonParser.parseString(givenConfig).getAsJsonObject();
+
+        if (config.danserConfigPath() != null) {
+            final String s = Files.readString(Path.of(config.danserConfigPath()), StandardCharsets.UTF_8);
+            final JsonObject patch = JsonParser.parseString(s).getAsJsonObject();
+
+            configObj = deepMergeJson(patch, configObj);
+        }
+
+        final String finalConfig = configObj.toString();
+
         Path settingsDir = danserPath.getParent().resolve("settings");
         Files.createDirectories(settingsDir);
         String profileName = "osurenderer_" + request.id().replace("-", "");

@@ -11,6 +11,8 @@ renderer:
   renderThreads: 1
   resultTtlMinutes: 15
   renderTimeoutMinutes: 10
+  # Config file to use for rendering. Will be merged with the config sent by oStella.
+  danserConfigPath: ""
 
 webserver:
   port: 8722

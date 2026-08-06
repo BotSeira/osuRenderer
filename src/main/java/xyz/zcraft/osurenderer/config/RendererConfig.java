@@ -8,7 +8,8 @@ public record RendererConfig(
         int renderQueueSize,
         int renderThreads,
         int resultTtlMinutes,
-        int renderTimeoutMinutes
+        int renderTimeoutMinutes,
+        String danserConfigPath
 ) {
     public RendererConfig {
         apiKey = apiKey == null ? "" : apiKey;
@@ -21,5 +22,6 @@ public record RendererConfig(
         renderThreads = renderThreads > 0 ? renderThreads : 1;
         resultTtlMinutes = resultTtlMinutes > 0 ? resultTtlMinutes : 15;
         renderTimeoutMinutes = renderTimeoutMinutes > 0 ? renderTimeoutMinutes : 10;
+        danserConfigPath = null;
     }
 }
