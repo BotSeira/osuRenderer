@@ -24,10 +24,10 @@ public final class OsuRenderer {
 
         try {
             AppConfig config = ConfigLoader.loadConfig();
-            try (WebServer server = new WebServer(config)) {
-                server.start();
-                Runtime.getRuntime().addShutdownHook(new Thread(server::close));
-            }
+            @SuppressWarnings("resource")
+            WebServer server = new WebServer(config);
+            server.start();
+            Runtime.getRuntime().addShutdownHook(new Thread(server::close));
         } catch (RuntimeException | IOException e) {
             LOG.error("Failed to start osuRenderer", e);
             System.exit(1);
