@@ -11,9 +11,6 @@ import java.io.IOException;
 public final class OsuRenderer {
     private static final Logger LOG = LogManager.getLogger(OsuRenderer.class);
 
-    private OsuRenderer() {
-    }
-
     static void main() {
         if (!ConfigLoader.configExists()) {
             try {
@@ -27,9 +24,10 @@ public final class OsuRenderer {
 
         try {
             AppConfig config = ConfigLoader.loadConfig();
-            WebServer server = new WebServer(config);
-            server.start();
-            Runtime.getRuntime().addShutdownHook(new Thread(server::close));
+            try (WebServer server = new WebServer(config)) {
+                server.start();
+                Runtime.getRuntime().addShutdownHook(new Thread(server::close));
+            }
         } catch (RuntimeException | IOException e) {
             LOG.error("Failed to start osuRenderer", e);
             System.exit(1);
