@@ -3,6 +3,8 @@ package xyz.zcraft.osurenderer.config;
 public record RendererConfig(
         String apiKey,
         String danserPath,
+        String commandPrefix,
+        String commandPrefixWin,
         String workPath,
         String cachePath,
         int renderQueueSize,

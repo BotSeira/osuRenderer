@@ -243,16 +243,17 @@ public final class ReplayRenderService implements Closeable {
     }
 
     private Path prepareDanser(List<String> command, RenderRequest request) throws IOException {
-        if (!System.getProperty("os.name").toLowerCase().contains("win")) {
-            command.add("xvfb-run");
-            command.add("-a");
+        final String e = System.getProperty("os.name").toLowerCase().contains("win")
+                ? config.commandPrefixWin() : config.commandPrefix();
+
+        if (e != null) {
+            command.addAll(List.of(e.split(" ")));
         }
+
         command.add(danserPath.toString());
         command.add("-noupdatecheck");
         command.add("-quickstart");
         command.add("-record");
-
-
 
         String suppliedConfig = Files.readString(request.config(), StandardCharsets.UTF_8);
         String givenConfig = applySongsPath(suppliedConfig, request.workspace().resolve("songs"));

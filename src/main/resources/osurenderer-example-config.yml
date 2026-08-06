@@ -2,6 +2,10 @@ renderer:
   # Shared secret used by oStella. Leave empty only on a trusted private network.
   apiKey: ""
   danserPath: "danser/danser-cli"
+  # Command prefix to run Danser with. For example, "xvfb-run -a" is required on headless Linux servers.
+  commandPrefix: "xvfb-run -a"
+  # Command prefix to run Danser with on Windows.
+  commandPrefixWin: ""
   # Temporary uploaded inputs are stored below this directory and deleted after rendering.
   workPath: "data"
   # Persistent beatmapset (.osz) and replay (.osr) cache shared by render jobs.
