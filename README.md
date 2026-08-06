@@ -8,9 +8,16 @@ credentials and does not download beatmaps or replays. For each job, oStella sen
 - the already constructed Danser JSON configuration;
 - render options such as start/end timestamps or showcase beatmap ID.
 
-osuRenderer stores those inputs in a per-job temporary directory, runs Danser in
-a bounded worker pool, exposes progress and the MP4 result, and removes uploaded
-inputs after the process exits. Results expire according to `resultTtlMinutes`.
+Before submission, oStella performs one batch cache lookup. It uploads only the
+beatmapsets and replays that osuRenderer does not already have. Cached `.osz`
+files are keyed by beatmapset ID and cached `.osr` files by score ID. Cache writes
+use temporary files and atomic replacement so concurrent submissions never expose
+partial files.
+
+osuRenderer assembles a per-job Danser workspace from the persistent cache, runs
+Danser in a bounded worker pool, exposes progress and the MP4 result, and removes
+only the temporary workspace after the process exits. Video results expire
+according to `resultTtlMinutes`; render inputs remain under `renderer.cachePath`.
 
 ## Run
 
@@ -27,11 +34,28 @@ does not connect to osuRenderer directly.
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/health` | Public liveness check |
+| POST | `/cache/status` | Batch lookup for cached beatmapset and replay IDs |
 | GET | `/renders/status` | Queue and active worker counts |
 | POST | `/renders` | Multipart render submission |
 | GET | `/renders/{jobId}/status` | Job progress |
 | GET | `/renders/{jobId}/video` | MP4 result |
 | DELETE | `/renders/{jobId}` | Remove result and metadata |
 
-All `/renders` endpoints require `Authorization: Bearer <apiKey>` when an API key
-is configured.
+All endpoints except `/health` require `Authorization: Bearer <apiKey>` when an
+API key is configured.
+
+`POST /renders` always receives `beatmapsetId` and the ordered JSON `replayIds`
+list. The `beatmapset` file, `replays` files, and parallel `replayUploadIds` list
+contain only cache misses. A request referencing a still-missing cache item is
+rejected with HTTP 409 instead of starting a broken render.
+Cache lookups and render references are limited to 1000 IDs per asset type and request.
+For rolling upgrades, the renderer still accepts the previous upload-all multipart
+format, but those legacy submissions cannot populate the ID-based cache. Upgrade
+osuRenderer before upgrading oStella.
+
+## Cache lifecycle
+
+The cache is persistent and has no automatic expiry because beatmapset and score
+IDs identify immutable render inputs. To clear it, stop osuRenderer and remove
+the configured cache directory. Active job workspaces and rendered videos are
+stored separately and are unaffected by cache lookup semantics.

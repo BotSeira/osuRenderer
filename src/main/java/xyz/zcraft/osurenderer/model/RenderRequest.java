@@ -8,7 +8,6 @@ public record RenderRequest(
         Mode mode,
         String beatmapId,
         List<Path> replays,
-        Path beatmapset,
         Path config,
         double start,
         double end,

@@ -4,6 +4,8 @@ renderer:
   danserPath: "danser/danser-cli"
   # Temporary uploaded inputs are stored below this directory and deleted after rendering.
   workPath: "data"
+  # Persistent beatmapset (.osz) and replay (.osr) cache shared by render jobs.
+  cachePath: "data/cache"
   # Maximum number of waiting jobs; running jobs are not counted.
   renderQueueSize: 5
   renderThreads: 1

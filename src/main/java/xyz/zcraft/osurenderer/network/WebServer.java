@@ -7,6 +7,7 @@ import org.apache.logging.log4j.Logger;
 import xyz.zcraft.osurenderer.config.AppConfig;
 import xyz.zcraft.osurenderer.service.QueueFullException;
 import xyz.zcraft.osurenderer.service.ReplayRenderService;
+import xyz.zcraft.osurenderer.service.MissingCacheAssetException;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -36,6 +37,7 @@ public final class WebServer implements Closeable {
                         response.addProperty("ok", true);
                         context.json(response);
                     })
+                    .post("/cache/status", controller::cacheStatus)
                     .get("/renders/status", controller::overview)
                     .post("/renders", controller::create)
                     .get("/renders/{jobId}/status", controller::status)
@@ -43,6 +45,8 @@ public final class WebServer implements Closeable {
                     .delete("/renders/{jobId}", controller::delete)
                     .exception(QueueFullException.class, (error, context) ->
                             context.status(429).result(error.getMessage()))
+                    .exception(MissingCacheAssetException.class, (error, context) ->
+                            context.status(409).result(error.getMessage()))
                     .exception(IllegalArgumentException.class, (error, context) ->
                             context.status(400).result(error.getMessage()))
                     .exception(Exception.class, (error, context) -> {

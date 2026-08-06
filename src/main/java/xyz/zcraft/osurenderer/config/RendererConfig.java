@@ -4,6 +4,7 @@ public record RendererConfig(
         String apiKey,
         String danserPath,
         String workPath,
+        String cachePath,
         int renderQueueSize,
         int renderThreads,
         int resultTtlMinutes,
@@ -13,6 +14,9 @@ public record RendererConfig(
         apiKey = apiKey == null ? "" : apiKey;
         danserPath = danserPath == null ? "danser/danser-cli" : danserPath;
         workPath = workPath == null || workPath.isBlank() ? "data" : workPath;
+        cachePath = cachePath == null || cachePath.isBlank()
+                ? java.nio.file.Path.of(workPath).resolve("cache").toString()
+                : cachePath;
         renderQueueSize = renderQueueSize > 0 ? renderQueueSize : 5;
         renderThreads = renderThreads > 0 ? renderThreads : 1;
         resultTtlMinutes = resultTtlMinutes > 0 ? resultTtlMinutes : 15;

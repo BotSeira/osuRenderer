@@ -5,6 +5,8 @@ import com.google.gson.JsonParser;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import xyz.zcraft.osurenderer.config.RendererConfig;
+import xyz.zcraft.osurenderer.model.CacheLookup;
+import xyz.zcraft.osurenderer.model.CacheStatus;
 import xyz.zcraft.osurenderer.model.JobProgress;
 import xyz.zcraft.osurenderer.model.JobStatus;
 import xyz.zcraft.osurenderer.model.QueuedJob;
@@ -43,6 +45,7 @@ public final class ReplayRenderService implements Closeable {
     private final RendererConfig config;
     private final Path danserPath;
     private final Path jobsPath;
+    private final RenderAssetCache assetCache;
     private final ThreadPoolExecutor executor;
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, JobProgress> jobs = new ConcurrentHashMap<>();
@@ -53,6 +56,11 @@ public final class ReplayRenderService implements Closeable {
         this.config = config;
         this.danserPath = Path.of(config.danserPath()).toAbsolutePath().normalize();
         this.jobsPath = Path.of(config.workPath()).toAbsolutePath().normalize().resolve("jobs");
+        Path cachePath = Path.of(config.cachePath()).toAbsolutePath().normalize();
+        if (cachePath.startsWith(jobsPath)) {
+            throw new IOException("renderer.cachePath must not be inside the temporary jobs directory");
+        }
+        this.assetCache = new RenderAssetCache(cachePath);
         deleteTree(jobsPath);
         Files.createDirectories(jobsPath);
 
@@ -73,6 +81,34 @@ public final class ReplayRenderService implements Closeable {
         Files.createDirectories(workspace.resolve("songs"));
         Files.createDirectories(workspace.resolve("replays"));
         return workspace;
+    }
+
+    public CacheStatus getCacheStatus(CacheLookup lookup) {
+        return assetCache.status(lookup);
+    }
+
+    public Path cacheBeatmapset(long beatmapsetId, InputStream input) throws IOException {
+        return assetCache.storeBeatmapset(beatmapsetId, input);
+    }
+
+    public Path cacheReplay(long scoreId, InputStream input) throws IOException {
+        return assetCache.storeReplay(scoreId, input);
+    }
+
+    public boolean hasBeatmapset(long beatmapsetId) {
+        return assetCache.hasBeatmapset(beatmapsetId);
+    }
+
+    public boolean hasReplay(long scoreId) {
+        return assetCache.hasReplay(scoreId);
+    }
+
+    public Path getCachedReplay(long scoreId) {
+        return assetCache.replayPath(scoreId);
+    }
+
+    public Path materializeBeatmapset(long beatmapsetId, Path destination) throws IOException {
+        return assetCache.materializeBeatmapset(beatmapsetId, destination);
     }
 
     public QueuedJob queue(RenderRequest request) {

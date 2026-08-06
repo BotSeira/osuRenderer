@@ -42,6 +42,7 @@ class ReplayRenderServiceTest {
                 "",
                 temporaryDirectory.resolve("danser-cli").toString(),
                 temporaryDirectory.resolve("work").toString(),
+                temporaryDirectory.resolve("cache").toString(),
                 1,
                 1,
                 1,
@@ -49,5 +50,21 @@ class ReplayRenderServiceTest {
         try (ReplayRenderService service = new ReplayRenderService(config)) {
             assertThrows(IOException.class, () -> service.deleteJob(".."));
         }
+    }
+
+    @Test
+    void persistentCacheCannotBePlacedInsideTemporaryJobs() {
+        Path work = temporaryDirectory.resolve("unsafe-work");
+        RendererConfig config = new RendererConfig(
+                "",
+                temporaryDirectory.resolve("danser-cli").toString(),
+                work.toString(),
+                work.resolve("jobs/cache").toString(),
+                1,
+                1,
+                1,
+                1);
+
+        assertThrows(IOException.class, () -> new ReplayRenderService(config));
     }
 }
