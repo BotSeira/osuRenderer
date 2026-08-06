@@ -244,7 +244,7 @@ public final class ReplayRenderService implements Closeable {
 
     private Path prepareDanser(List<String> command, RenderRequest request) throws IOException {
         final String e = System.getProperty("os.name").toLowerCase().contains("win")
-                ? config.commandPrefixWin() : config.commandPrefix();
+                ? config.danserRuntime().commandPrefixWin() : config.danserRuntime().commandPrefix();
 
         if (e != null) {
             command.addAll(List.of(e.split(" ")));
@@ -297,7 +297,12 @@ public final class ReplayRenderService implements Closeable {
         Files.deleteIfExists(video);
 
         LOG.info("Starting render job {}", jobId);
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        final ProcessBuilder processBuilder = new ProcessBuilder(command);
+
+        processBuilder.environment().putAll(config.danserRuntime().envVars());
+
+        Process process = processBuilder.redirectErrorStream(true).start();
+
         consumeDanserOutput(process.getInputStream(), jobId);
 
         boolean finished = process.waitFor(config.renderTimeoutMinutes(), TimeUnit.MINUTES);
