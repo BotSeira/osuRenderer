@@ -246,7 +246,7 @@ public final class ReplayRenderService implements Closeable {
         final String e = System.getProperty("os.name").toLowerCase().contains("win")
                 ? config.danserRuntime().commandPrefixWin() : config.danserRuntime().commandPrefix();
 
-        if (e != null) {
+        if (e != null && !e.isBlank()) {
             command.addAll(List.of(e.split(" ")));
         }
 
