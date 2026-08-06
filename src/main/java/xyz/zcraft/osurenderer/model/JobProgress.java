@@ -6,9 +6,10 @@ public record JobProgress(
         String progress,
         String speed,
         String eta,
-        String error
+        String error,
+        QqFileInfo qqFile
 ) {
     public JobProgress(String id, JobStatus status) {
-        this(id, status, null, null, null, null);
+        this(id, status, null, null, null, null, null);
     }
 }

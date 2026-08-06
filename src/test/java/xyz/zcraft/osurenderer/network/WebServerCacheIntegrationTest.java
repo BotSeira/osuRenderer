@@ -40,6 +40,18 @@ class WebServerCacheIntegrationTest {
         server.start();
 
         try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> health = client.send(HttpRequest.newBuilder(
+                            URI.create("http://127.0.0.1:" + port + "/health")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, health.statusCode());
+            assertEquals("{\"ok\":true}", health.body());
+
+            HttpResponse<String> overview = client.send(HttpRequest.newBuilder(
+                            URI.create("http://127.0.0.1:" + port + "/renders/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, overview.statusCode());
+            assertTrue(overview.body().contains("\"queue\""));
+
             URI renders = URI.create("http://127.0.0.1:" + port + "/renders");
             HttpResponse<String> first = client.send(multipartRequest(renders, true),
                     HttpResponse.BodyHandlers.ofString());

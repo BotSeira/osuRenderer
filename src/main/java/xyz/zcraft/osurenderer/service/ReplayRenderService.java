@@ -10,6 +10,7 @@ import xyz.zcraft.osurenderer.model.CacheStatus;
 import xyz.zcraft.osurenderer.model.JobProgress;
 import xyz.zcraft.osurenderer.model.JobStatus;
 import xyz.zcraft.osurenderer.model.QueuedJob;
+import xyz.zcraft.osurenderer.model.QqFileInfo;
 import xyz.zcraft.osurenderer.model.RenderRequest;
 
 import java.io.BufferedReader;
@@ -46,6 +47,7 @@ public final class ReplayRenderService implements Closeable {
     private final Path danserPath;
     private final Path jobsPath;
     private final RenderAssetCache assetCache;
+    private final QqVideoUploader qqVideoUploader;
     private final ThreadPoolExecutor executor;
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, JobProgress> jobs = new ConcurrentHashMap<>();
@@ -53,7 +55,12 @@ public final class ReplayRenderService implements Closeable {
     private final Map<String, Long> touchedAt = new ConcurrentHashMap<>();
 
     public ReplayRenderService(RendererConfig config) throws IOException {
+        this(config, new QqVideoUploader());
+    }
+
+    ReplayRenderService(RendererConfig config, QqVideoUploader qqVideoUploader) throws IOException {
         this.config = config;
+        this.qqVideoUploader = qqVideoUploader;
         this.danserPath = Path.of(config.danserPath()).toAbsolutePath().normalize();
         this.jobsPath = Path.of(config.workPath()).toAbsolutePath().normalize().resolve("jobs");
         Path cachePath = Path.of(config.cachePath()).toAbsolutePath().normalize();
@@ -191,7 +198,31 @@ public final class ReplayRenderService implements Closeable {
             }
             command.add("-out=" + outputName);
 
-            runDanser(request.id(), outputName, command);
+            Path video = runDanser(request.id(), outputName, command);
+            if (video == null) {
+                return;
+            }
+            results.put(request.id(), video);
+
+            QqFileInfo qqFile = null;
+            String uploadError = null;
+            if (request.qqUpload() != null) {
+                update(request.id(), new JobProgress(request.id(), JobStatus.UPLOADING));
+                try {
+                    qqFile = qqVideoUploader.upload(video, request.qqUpload());
+                    LOG.info("Uploaded render job {} to QQ", request.id());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    uploadError = "QQ upload interrupted";
+                    LOG.warn("QQ upload interrupted for render job {}", request.id(), e);
+                } catch (Exception e) {
+                    uploadError = e.getMessage() == null ? "QQ upload failed" : e.getMessage();
+                    LOG.warn("Failed to upload render job {} to QQ; the video remains available", request.id(), e);
+                }
+            }
+            update(request.id(), new JobProgress(
+                    request.id(), JobStatus.DONE, null, null, null, uploadError, qqFile));
+            LOG.info("Finished render job {}", request.id());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             fail(request.id(), "Render interrupted", e);
@@ -242,7 +273,7 @@ public final class ReplayRenderService implements Closeable {
         return value;
     }
 
-    private void runDanser(String jobId, String outputName, List<String> command)
+    private Path runDanser(String jobId, String outputName, List<String> command)
             throws IOException, InterruptedException {
         Path video = danserPath.getParent().resolve("videos").resolve(outputName + ".mp4").normalize();
         Files.createDirectories(video.getParent());
@@ -255,17 +286,16 @@ public final class ReplayRenderService implements Closeable {
         boolean finished = process.waitFor(config.renderTimeoutMinutes(), TimeUnit.MINUTES);
         if (!finished) {
             process.destroyForcibly();
-            update(jobId, new JobProgress(jobId, JobStatus.TIMEOUT, null, null, null, "Render timed out"));
+            update(jobId, new JobProgress(jobId, JobStatus.TIMEOUT, null, null, null,
+                    "Render timed out", null));
             LOG.error("Render job {} timed out", jobId);
-            return;
+            return null;
         }
         if (process.exitValue() != 0 || !Files.isRegularFile(video)) {
             throw new IOException("Danser exited with code " + process.exitValue() + " without a video");
         }
 
-        results.put(jobId, video);
-        update(jobId, new JobProgress(jobId, JobStatus.DONE));
-        LOG.info("Finished render job {}", jobId);
+        return video;
     }
 
     private void consumeDanserOutput(InputStream input, String jobId) {
@@ -281,6 +311,7 @@ public final class ReplayRenderService implements Closeable {
                                 matcher.group(1) + "%",
                                 matcher.group(2) + "x",
                                 matcher.group(3),
+                                null,
                                 null));
                     }
                     DANSER_LOG.info(line);
@@ -292,7 +323,7 @@ public final class ReplayRenderService implements Closeable {
     }
 
     private void fail(String jobId, String message, Exception error) {
-        update(jobId, new JobProgress(jobId, JobStatus.FAILED, null, null, null, message));
+        update(jobId, new JobProgress(jobId, JobStatus.FAILED, null, null, null, message, null));
         LOG.error("Render job {} failed", jobId, error);
     }
 
@@ -312,7 +343,9 @@ public final class ReplayRenderService implements Closeable {
                 continue;
             }
             JobProgress progress = jobs.get(entry.getKey());
-            if (progress != null && (progress.status() == JobStatus.QUEUED || progress.status() == JobStatus.RENDERING)) {
+            if (progress != null && (progress.status() == JobStatus.QUEUED
+                    || progress.status() == JobStatus.RENDERING
+                    || progress.status() == JobStatus.UPLOADING)) {
                 continue;
             }
             try {

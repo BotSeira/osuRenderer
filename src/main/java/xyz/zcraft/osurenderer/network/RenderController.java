@@ -7,6 +7,7 @@ import io.javalin.http.UploadedFile;
 import xyz.zcraft.osurenderer.model.JobProgress;
 import xyz.zcraft.osurenderer.model.CacheLookup;
 import xyz.zcraft.osurenderer.model.QueuedJob;
+import xyz.zcraft.osurenderer.model.QqUploadRequest;
 import xyz.zcraft.osurenderer.model.RenderRequest;
 import xyz.zcraft.osurenderer.service.ReplayRenderService;
 import xyz.zcraft.osurenderer.service.MissingCacheAssetException;
@@ -35,11 +36,12 @@ public final class RenderController {
         RenderRequest.Mode mode = parseMode(context.formParam("mode"));
         UploadedFile configUpload = requireUpload(context, "config");
         String beatmapId = context.formParam("beatmapId");
+        QqUploadRequest qqUpload = parseQqUpload(context.formParam("qqUpload"));
         if (mode == RenderRequest.Mode.SHOWCASE && (beatmapId == null || beatmapId.isBlank())) {
             throw new IllegalArgumentException("beatmapId is required for showcase renders");
         }
         if (context.formParam("beatmapsetId") == null) {
-            createLegacy(context, mode, beatmapId, configUpload);
+            createLegacy(context, mode, beatmapId, configUpload, qqUpload);
             return;
         }
 
@@ -106,7 +108,8 @@ public final class RenderController {
                     config,
                     parseOptionalDouble(context.formParam("start")),
                     parseOptionalDouble(context.formParam("end")),
-                    workspace);
+                    workspace,
+                    qqUpload);
             respondQueued(context, service.queue(request));
         } catch (Exception e) {
             ReplayRenderService.deleteTree(workspace);
@@ -115,7 +118,7 @@ public final class RenderController {
     }
 
     private void createLegacy(Context context, RenderRequest.Mode mode, String beatmapId,
-                              UploadedFile configUpload) throws IOException {
+                              UploadedFile configUpload, QqUploadRequest qqUpload) throws IOException {
         UploadedFile beatmapsetUpload = requireUpload(context, "beatmapset");
         List<UploadedFile> replayUploads = context.uploadedFiles("replays");
         if (replayUploads.isEmpty()) {
@@ -143,7 +146,8 @@ public final class RenderController {
                     config,
                     parseOptionalDouble(context.formParam("start")),
                     parseOptionalDouble(context.formParam("end")),
-                    workspace);
+                    workspace,
+                    qqUpload);
             respondQueued(context, service.queue(request));
         } catch (Exception e) {
             ReplayRenderService.deleteTree(workspace);
@@ -163,7 +167,7 @@ public final class RenderController {
         JsonObject response = new JsonObject();
         response.addProperty("queue", service.queueSize());
         response.addProperty("active", service.activeCount());
-        context.json(response);
+        context.contentType("application/json").result(response.toString());
     }
 
     public void cacheStatus(Context context) {
@@ -246,6 +250,21 @@ public final class RenderController {
             return Double.NaN;
         }
         return Double.parseDouble(value);
+    }
+
+    private static QqUploadRequest parseQqUpload(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            QqUploadRequest request = GSON.fromJson(json, QqUploadRequest.class);
+            if (request == null) {
+                throw new IllegalArgumentException("qqUpload must be a JSON object");
+            }
+            return request;
+        } catch (com.google.gson.JsonParseException e) {
+            throw new IllegalArgumentException("qqUpload must be a valid JSON object", e);
+        }
     }
 
     private static List<Long> parseIds(String json, String fieldName, boolean optional) {

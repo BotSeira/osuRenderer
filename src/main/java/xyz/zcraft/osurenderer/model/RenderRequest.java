@@ -11,7 +11,8 @@ public record RenderRequest(
         Path config,
         double start,
         double end,
-        Path workspace
+        Path workspace,
+        QqUploadRequest qqUpload
 ) {
     public enum Mode {
         SINGLE,
