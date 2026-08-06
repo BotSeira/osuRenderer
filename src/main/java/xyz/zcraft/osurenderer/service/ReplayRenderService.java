@@ -252,6 +252,8 @@ public final class ReplayRenderService implements Closeable {
         command.add("-quickstart");
         command.add("-record");
 
+
+
         String suppliedConfig = Files.readString(request.config(), StandardCharsets.UTF_8);
         String givenConfig = applySongsPath(suppliedConfig, request.workspace().resolve("songs"));
 
@@ -261,7 +263,7 @@ public final class ReplayRenderService implements Closeable {
             final String s = Files.readString(Path.of(config.danserConfigPath()), StandardCharsets.UTF_8);
             final JsonObject patch = JsonParser.parseString(s).getAsJsonObject();
 
-            configObj = deepMergeJson(patch, configObj);
+            configObj = deepMergeJson(configObj, patch);
         }
 
         final String finalConfig = configObj.toString();
