@@ -299,7 +299,8 @@ public final class ReplayRenderService implements Closeable {
         LOG.info("Starting render job {}", jobId);
         final ProcessBuilder processBuilder = new ProcessBuilder(command);
 
-        processBuilder.environment().putAll(config.danserRuntime().envVars());
+        final Map<String, String> m = config.danserRuntime().envVars();
+        if (m != null) processBuilder.environment().putAll(m);
 
         Process process = processBuilder.redirectErrorStream(true).start();
 
