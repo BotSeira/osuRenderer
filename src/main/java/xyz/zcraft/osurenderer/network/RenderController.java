@@ -4,24 +4,16 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.javalin.http.Context;
 import io.javalin.http.UploadedFile;
-import xyz.zcraft.osurenderer.model.JobProgress;
-import xyz.zcraft.osurenderer.model.CacheLookup;
-import xyz.zcraft.osurenderer.model.QueuedJob;
-import xyz.zcraft.osurenderer.model.QqUploadRequest;
-import xyz.zcraft.osurenderer.model.RenderRequest;
-import xyz.zcraft.osurenderer.service.ReplayRenderService;
+import xyz.zcraft.osurenderer.model.*;
 import xyz.zcraft.osurenderer.service.MissingCacheAssetException;
+import xyz.zcraft.osurenderer.service.ReplayRenderService;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
+import java.util.*;
 
 public final class RenderController {
     private static final Gson GSON = new Gson();
@@ -30,6 +22,101 @@ public final class RenderController {
 
     public RenderController(ReplayRenderService service) {
         this.service = service;
+    }
+
+    private static void respondQueued(Context context, QueuedJob queued) {
+        JsonObject response = new JsonObject();
+        response.addProperty("id", queued.id());
+        response.addProperty("status", "queued");
+        response.addProperty("position", queued.position());
+        context.status(202).contentType("application/json").result(response.toString());
+    }
+
+    private static UploadedFile requireUpload(Context context, String name) {
+        UploadedFile upload = context.uploadedFile(name);
+        if (upload == null || upload.size() == 0) {
+            throw new IllegalArgumentException(name + " file is required");
+        }
+        return upload;
+    }
+
+    private static Path save(UploadedFile upload, Path destination) throws IOException {
+        Files.createDirectories(destination.getParent());
+        try (InputStream input = upload.content()) {
+            Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return destination;
+    }
+
+    private static RenderRequest.Mode parseMode(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("mode is required");
+        }
+        try {
+            return RenderRequest.Mode.valueOf(value.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("mode must be single or showcase");
+        }
+    }
+
+    private static double parseOptionalDouble(String value) {
+        if (value == null || value.isBlank()) {
+            return Double.NaN;
+        }
+        return Double.parseDouble(value);
+    }
+
+    private static QqUploadRequest parseQqUpload(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            QqUploadRequest request = GSON.fromJson(json, QqUploadRequest.class);
+            if (request == null) {
+                throw new IllegalArgumentException("qqUpload must be a JSON object");
+            }
+            return request;
+        } catch (com.google.gson.JsonParseException e) {
+            throw new IllegalArgumentException("qqUpload must be a valid JSON object", e);
+        }
+    }
+
+    private static List<Long> parseIds(String json, String fieldName, boolean optional) {
+        if (json == null || json.isBlank()) {
+            if (optional) {
+                return List.of();
+            }
+            throw new IllegalArgumentException(fieldName + " is required");
+        }
+        try {
+            Long[] values = GSON.fromJson(json, Long[].class);
+            if (values == null || (!optional && values.length == 0)) {
+                throw new IllegalArgumentException(fieldName + " must not be empty");
+            }
+            List<Long> ids = new ArrayList<>(values.length);
+            for (Long value : values) {
+                if (value == null || value <= 0) {
+                    throw new IllegalArgumentException(fieldName + " must contain only positive ids");
+                }
+                ids.add(value);
+            }
+            return List.copyOf(ids);
+        } catch (com.google.gson.JsonParseException e) {
+            throw new IllegalArgumentException(fieldName + " must be a JSON array of ids", e);
+        }
+    }
+
+    @SuppressWarnings("SameParameterValue")
+    private static long requirePositiveLong(String value, String fieldName) {
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed <= 0) {
+                throw new NumberFormatException();
+            }
+            return parsed;
+        } catch (NumberFormatException | NullPointerException e) {
+            throw new IllegalArgumentException(fieldName + " must be a positive id");
+        }
     }
 
     public void create(Context context) throws IOException {
@@ -63,7 +150,7 @@ public final class RenderController {
             throw new IllegalArgumentException("replayIds must be unique");
         }
         if (new HashSet<>(replayUploadIds).size() != replayUploadIds.size()
-                || !replayIds.containsAll(replayUploadIds)) {
+                || !new HashSet<>(replayIds).containsAll(replayUploadIds)) {
             throw new IllegalArgumentException("replayUploadIds must be unique members of replayIds");
         }
 
@@ -155,14 +242,6 @@ public final class RenderController {
         }
     }
 
-    private static void respondQueued(Context context, QueuedJob queued) {
-        JsonObject response = new JsonObject();
-        response.addProperty("id", queued.id());
-        response.addProperty("status", "queued");
-        response.addProperty("position", queued.position());
-        context.status(202).contentType("application/json").result(response.toString());
-    }
-
     public void overview(Context context) {
         JsonObject response = new JsonObject();
         response.addProperty("queue", service.queueSize());
@@ -216,91 +295,5 @@ public final class RenderController {
     public void delete(Context context) throws IOException {
         service.deleteJob(context.pathParam("jobId"));
         context.status(204);
-    }
-
-    private static UploadedFile requireUpload(Context context, String name) {
-        UploadedFile upload = context.uploadedFile(name);
-        if (upload == null || upload.size() == 0) {
-            throw new IllegalArgumentException(name + " file is required");
-        }
-        return upload;
-    }
-
-    private static Path save(UploadedFile upload, Path destination) throws IOException {
-        Files.createDirectories(destination.getParent());
-        try (InputStream input = upload.content()) {
-            Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
-        }
-        return destination;
-    }
-
-    private static RenderRequest.Mode parseMode(String value) {
-        if (value == null) {
-            throw new IllegalArgumentException("mode is required");
-        }
-        try {
-            return RenderRequest.Mode.valueOf(value.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("mode must be single or showcase");
-        }
-    }
-
-    private static double parseOptionalDouble(String value) {
-        if (value == null || value.isBlank()) {
-            return Double.NaN;
-        }
-        return Double.parseDouble(value);
-    }
-
-    private static QqUploadRequest parseQqUpload(String json) {
-        if (json == null || json.isBlank()) {
-            return null;
-        }
-        try {
-            QqUploadRequest request = GSON.fromJson(json, QqUploadRequest.class);
-            if (request == null) {
-                throw new IllegalArgumentException("qqUpload must be a JSON object");
-            }
-            return request;
-        } catch (com.google.gson.JsonParseException e) {
-            throw new IllegalArgumentException("qqUpload must be a valid JSON object", e);
-        }
-    }
-
-    private static List<Long> parseIds(String json, String fieldName, boolean optional) {
-        if (json == null || json.isBlank()) {
-            if (optional) {
-                return List.of();
-            }
-            throw new IllegalArgumentException(fieldName + " is required");
-        }
-        try {
-            Long[] values = GSON.fromJson(json, Long[].class);
-            if (values == null || (!optional && values.length == 0)) {
-                throw new IllegalArgumentException(fieldName + " must not be empty");
-            }
-            List<Long> ids = new ArrayList<>(values.length);
-            for (Long value : values) {
-                if (value == null || value <= 0) {
-                    throw new IllegalArgumentException(fieldName + " must contain only positive ids");
-                }
-                ids.add(value);
-            }
-            return List.copyOf(ids);
-        } catch (com.google.gson.JsonParseException e) {
-            throw new IllegalArgumentException(fieldName + " must be a JSON array of ids", e);
-        }
-    }
-
-    private static long requirePositiveLong(String value, String fieldName) {
-        try {
-            long parsed = Long.parseLong(value);
-            if (parsed <= 0) {
-                throw new NumberFormatException();
-            }
-            return parsed;
-        } catch (NumberFormatException | NullPointerException e) {
-            throw new IllegalArgumentException(fieldName + " must be a positive id");
-        }
     }
 }

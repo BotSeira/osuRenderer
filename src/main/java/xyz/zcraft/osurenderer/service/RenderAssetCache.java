@@ -25,6 +25,41 @@ public final class RenderAssetCache {
         Files.createDirectories(replaysPath);
     }
 
+    private static Path store(Path destination, InputStream input) throws IOException {
+        Files.createDirectories(destination.getParent());
+        Path temporary = destination.getParent().resolve(
+                "." + destination.getFileName() + "." + UUID.randomUUID() + ".tmp");
+        try {
+            Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING);
+            if (Files.size(temporary) == 0) {
+                throw new IOException("Refusing to cache an empty file");
+            }
+            try {
+                return Files.move(temporary, destination,
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                return Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static boolean validFile(Path path) {
+        try {
+            return Files.isRegularFile(path) && Files.size(path) > 0;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static long requireId(long id) {
+        if (id <= 0) {
+            throw new IllegalArgumentException("Cache ids must be positive");
+        }
+        return id;
+    }
+
     public CacheStatus status(CacheLookup lookup) {
         Set<Long> beatmapsets = lookup.beatmapsetIds().stream()
                 .map(RenderAssetCache::requireId)
@@ -73,40 +108,5 @@ public final class RenderAssetCache {
         } catch (UnsupportedOperationException | IOException e) {
             return Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
         }
-    }
-
-    private static Path store(Path destination, InputStream input) throws IOException {
-        Files.createDirectories(destination.getParent());
-        Path temporary = destination.getParent().resolve(
-                "." + destination.getFileName() + "." + UUID.randomUUID() + ".tmp");
-        try {
-            Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING);
-            if (Files.size(temporary) == 0) {
-                throw new IOException("Refusing to cache an empty file");
-            }
-            try {
-                return Files.move(temporary, destination,
-                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                return Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
-    }
-
-    private static boolean validFile(Path path) {
-        try {
-            return Files.isRegularFile(path) && Files.size(path) > 0;
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    private static long requireId(long id) {
-        if (id <= 0) {
-            throw new IllegalArgumentException("Cache ids must be positive");
-        }
-        return id;
     }
 }

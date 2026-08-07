@@ -5,34 +5,14 @@ import com.google.gson.JsonParser;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import xyz.zcraft.osurenderer.config.RendererConfig;
-import xyz.zcraft.osurenderer.model.CacheLookup;
-import xyz.zcraft.osurenderer.model.CacheStatus;
-import xyz.zcraft.osurenderer.model.JobProgress;
-import xyz.zcraft.osurenderer.model.JobStatus;
-import xyz.zcraft.osurenderer.model.QueuedJob;
-import xyz.zcraft.osurenderer.model.QqFileInfo;
-import xyz.zcraft.osurenderer.model.RenderRequest;
+import xyz.zcraft.osurenderer.model.*;
 
-import java.io.BufferedReader;
-import java.io.Closeable;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -85,6 +65,36 @@ public final class ReplayRenderService implements Closeable {
         cleanupExecutor.scheduleAtFixedRate(this::cleanupExpiredJobs, 1, 1, TimeUnit.MINUTES);
     }
 
+    static String applySongsPath(String configJson, Path songsPath) {
+        JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
+        JsonObject general;
+        if (root.has("General") && root.get("General").isJsonObject()) {
+            general = root.getAsJsonObject("General");
+        } else {
+            general = new JsonObject();
+            root.add("General", general);
+        }
+        general.addProperty("OsuSongsDir", songsPath.toAbsolutePath().toString().replace('\\', '/'));
+        return root.toString();
+    }
+
+    public static void deleteTree(Path root) {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    LOG.warn("Failed to delete {}", path, e);
+                }
+            });
+        } catch (IOException e) {
+            LOG.warn("Failed to enumerate {} for deletion", root, e);
+        }
+    }
+
     public Path createWorkspace(String jobId) throws IOException {
         Path workspace = resolveWorkspace(jobId);
         Files.createDirectories(workspace.resolve("songs"));
@@ -96,10 +106,12 @@ public final class ReplayRenderService implements Closeable {
         return assetCache.status(lookup);
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     public Path cacheBeatmapset(long beatmapsetId, InputStream input) throws IOException {
         return assetCache.storeBeatmapset(beatmapsetId, input);
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     public Path cacheReplay(long scoreId, InputStream input) throws IOException {
         return assetCache.storeReplay(scoreId, input);
     }
@@ -116,6 +128,7 @@ public final class ReplayRenderService implements Closeable {
         return assetCache.replayPath(scoreId);
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     public Path materializeBeatmapset(long beatmapsetId, Path destination) throws IOException {
         return assetCache.materializeBeatmapset(beatmapsetId, destination);
     }
@@ -163,19 +176,6 @@ public final class ReplayRenderService implements Closeable {
             Files.deleteIfExists(result);
         }
         deleteTree(resolveWorkspace(jobId));
-    }
-
-    static String applySongsPath(String configJson, Path songsPath) {
-        JsonObject root = JsonParser.parseString(configJson).getAsJsonObject();
-        JsonObject general;
-        if (root.has("General") && root.get("General").isJsonObject()) {
-            general = root.getAsJsonObject("General");
-        } else {
-            general = new JsonObject();
-            root.add("General", general);
-        }
-        general.addProperty("OsuSongsDir", songsPath.toAbsolutePath().toString().replace('\\', '/'));
-        return root.toString();
     }
 
     private void render(RenderRequest request) {
@@ -389,23 +389,6 @@ public final class ReplayRenderService implements Closeable {
             throw new IOException("Invalid job id");
         }
         return workspace;
-    }
-
-    public static void deleteTree(Path root) {
-        if (root == null || !Files.exists(root)) {
-            return;
-        }
-        try (Stream<Path> paths = Files.walk(root)) {
-            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
-                try {
-                    Files.deleteIfExists(path);
-                } catch (IOException e) {
-                    LOG.warn("Failed to delete {}", path, e);
-                }
-            });
-        } catch (IOException e) {
-            LOG.warn("Failed to enumerate {} for deletion", root, e);
-        }
     }
 
     @Override

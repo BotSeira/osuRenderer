@@ -1,3 +1,4 @@
 package xyz.zcraft.osurenderer.config;
 
-public record AppConfig(RendererConfig renderer, WebserverConfig webserver) { }
+public record AppConfig(RendererConfig renderer, WebserverConfig webserver) {
+}

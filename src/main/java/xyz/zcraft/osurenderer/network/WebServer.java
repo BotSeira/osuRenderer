@@ -5,9 +5,9 @@ import io.javalin.Javalin;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import xyz.zcraft.osurenderer.config.AppConfig;
+import xyz.zcraft.osurenderer.service.MissingCacheAssetException;
 import xyz.zcraft.osurenderer.service.QueueFullException;
 import xyz.zcraft.osurenderer.service.ReplayRenderService;
-import xyz.zcraft.osurenderer.service.MissingCacheAssetException;
 
 import java.io.Closeable;
 import java.io.IOException;

@@ -26,12 +26,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public final class QqVideoUploader {
     private static final URI DEFAULT_ENDPOINT = URI.create("https://api.sgroup.qq.com/");
@@ -56,6 +51,61 @@ public final class QqVideoUploader {
         this.endpoint = endpoint;
         this.apiClient = apiClient;
         this.mediaClient = mediaClient;
+    }
+
+    private static MediaDigests calculateDigests(Path file) throws IOException {
+        MessageDigest md5 = newDigest("MD5");
+        MessageDigest sha1 = newDigest("SHA-1");
+        MessageDigest md5First10m = newDigest("MD5");
+        long first10mBytes = 0;
+        try (InputStream input = Files.newInputStream(file)) {
+            byte[] buffer = new byte[1024 * 1024];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read == 0) continue;
+                md5.update(buffer, 0, read);
+                sha1.update(buffer, 0, read);
+                if (first10mBytes < MD5_10M_SIZE) {
+                    int digestLength = (int) Math.min(read, MD5_10M_SIZE - first10mBytes);
+                    md5First10m.update(buffer, 0, digestLength);
+                    first10mBytes += digestLength;
+                }
+            }
+        }
+        return new MediaDigests(HexFormat.of().formatHex(md5.digest()),
+                HexFormat.of().formatHex(sha1.digest()),
+                HexFormat.of().formatHex(md5First10m.digest()));
+    }
+
+    private static byte[] readPart(Path file, long defaultBlockSize, UploadPart part) throws IOException {
+        long offset = Math.multiplyExact((long) part.index() - 1, defaultBlockSize);
+        long requestedSize = part.blockSize() > 0 ? part.blockSize() : defaultBlockSize;
+        int size = Math.toIntExact(Math.min(requestedSize, Files.size(file) - offset));
+        if (size <= 0) throw new IOException("Invalid video part range: index=" + part.index());
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
+            while (buffer.hasRemaining()) {
+                int read = channel.read(buffer, offset + buffer.position());
+                if (read < 0) throw new IOException("Unexpected end of video part " + part.index());
+            }
+        }
+        return buffer.array();
+    }
+
+    private static MessageDigest newDigest(String algorithm) {
+        try {
+            return MessageDigest.getInstance(algorithm);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("Missing digest algorithm " + algorithm, e);
+        }
+    }
+
+    @SuppressWarnings("SameParameterValue")
+    private static String requiredString(JsonObject object, String name, String action) {
+        if (!object.has(name) || object.get(name).isJsonNull() || object.get(name).getAsString().isBlank()) {
+            throw new IllegalArgumentException("Failed to " + action + ": missing " + name);
+        }
+        return object.get(name).getAsString();
     }
 
     public QqFileInfo upload(Path video, QqUploadRequest request) throws IOException, InterruptedException {
@@ -150,6 +200,7 @@ public final class QqVideoUploader {
                 if (System.nanoTime() >= deadline) {
                     break;
                 }
+                //noinspection BusyWait
                 Thread.sleep(TimeUnit.SECONDS.toMillis(prepare.retryDelaySeconds()));
             }
         } while (System.nanoTime() < deadline);
@@ -205,62 +256,13 @@ public final class QqVideoUploader {
         }
     }
 
-    private static MediaDigests calculateDigests(Path file) throws IOException {
-        MessageDigest md5 = newDigest("MD5");
-        MessageDigest sha1 = newDigest("SHA-1");
-        MessageDigest md5First10m = newDigest("MD5");
-        long first10mBytes = 0;
-        try (InputStream input = Files.newInputStream(file)) {
-            byte[] buffer = new byte[1024 * 1024];
-            int read;
-            while ((read = input.read(buffer)) >= 0) {
-                if (read == 0) continue;
-                md5.update(buffer, 0, read);
-                sha1.update(buffer, 0, read);
-                if (first10mBytes < MD5_10M_SIZE) {
-                    int digestLength = (int) Math.min(read, MD5_10M_SIZE - first10mBytes);
-                    md5First10m.update(buffer, 0, digestLength);
-                    first10mBytes += digestLength;
-                }
-            }
-        }
-        return new MediaDigests(HexFormat.of().formatHex(md5.digest()),
-                HexFormat.of().formatHex(sha1.digest()),
-                HexFormat.of().formatHex(md5First10m.digest()));
+    private record MediaDigests(String md5, String sha1, String md5First10m) {
     }
 
-    private static byte[] readPart(Path file, long defaultBlockSize, UploadPart part) throws IOException {
-        long offset = Math.multiplyExact((long) part.index() - 1, defaultBlockSize);
-        long requestedSize = part.blockSize() > 0 ? part.blockSize() : defaultBlockSize;
-        int size = Math.toIntExact(Math.min(requestedSize, Files.size(file) - offset));
-        if (size <= 0) throw new IOException("Invalid video part range: index=" + part.index());
-        ByteBuffer buffer = ByteBuffer.allocate(size);
-        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
-            while (buffer.hasRemaining()) {
-                int read = channel.read(buffer, offset + buffer.position());
-                if (read < 0) throw new IOException("Unexpected end of video part " + part.index());
-            }
-        }
-        return buffer.array();
+    private record UploadPart(int index, String presignedUrl, long blockSize) {
     }
 
-    private static MessageDigest newDigest(String algorithm) {
-        try {
-            return MessageDigest.getInstance(algorithm);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("Missing digest algorithm " + algorithm, e);
-        }
-    }
-
-    private static String requiredString(JsonObject object, String name, String action) {
-        if (!object.has(name) || object.get(name).isJsonNull() || object.get(name).getAsString().isBlank()) {
-            throw new IllegalArgumentException("Failed to " + action + ": missing " + name);
-        }
-        return object.get(name).getAsString();
-    }
-
-    private record MediaDigests(String md5, String sha1, String md5First10m) {}
-    private record UploadPart(int index, String presignedUrl, long blockSize) {}
     private record UploadPrepare(String uploadId, long blockSize, List<UploadPart> parts, int concurrency,
-                                 int retryTimeoutSeconds, int retryDelaySeconds) {}
+                                 int retryTimeoutSeconds, int retryDelaySeconds) {
+    }
 }
