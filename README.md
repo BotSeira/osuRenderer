@@ -30,6 +30,8 @@ download-and-upload fallback.
 
 ## Run
 
+Local administration commands are documented in [docs/console.md](docs/console.md). Runtime output is handled by Log4J2 and interactive input by JLine.
+
 Build with `mvn package`, then run the `jar-with-dependencies` artifact. On the
 first run, the service writes `config.yml` and exits. Configure `danserPath` and
 set `renderer.apiKey` to the same secret used by oStella.
@@ -49,6 +51,8 @@ of a render request and are never returned by status endpoints or written to the
 |---|---|---|
 | GET | `/health` | Public liveness check |
 | POST | `/cache/status` | Batch lookup for cached beatmapset and replay IDs |
+| POST | `/cache/control` | Query, inspect, or delete one cached asset |
+| POST | `/cache/fetch` | Accept one beatmapset or replay uploaded by oStella |
 | GET | `/renders/status` | Queue and active worker counts |
 | POST | `/renders` | Multipart render submission |
 | GET | `/renders/{jobId}/status` | Job progress |

@@ -271,6 +271,33 @@ public final class RenderController {
         context.contentType("application/json").result(response.toString());
     }
 
+    public void cacheControl(Context context) {
+        CacheControlRequest request;
+        try {
+            request = GSON.fromJson(context.body(), CacheControlRequest.class);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("Invalid cache control body", e);
+        }
+        CacheControlResult result = service.controlCache(request);
+        context.contentType("application/json").result(GSON.toJson(result));
+    }
+
+    public void cacheFetch(Context context) throws IOException {
+        String type = context.formParam("type");
+        String idValue = context.formParam("id");
+        UploadedFile asset = requireUpload(context, "asset");
+        long id;
+        try {
+            id = Long.parseLong(idValue);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("Cache id must be a positive integer", e);
+        }
+        try (InputStream input = asset.content()) {
+            CacheControlResult result = service.storeFetchedCache(type, id, input);
+            context.contentType("application/json").result(GSON.toJson(result));
+        }
+    }
+
     public void status(Context context) {
         String jobId = context.pathParam("jobId");
         JobProgress progress = service.getProgress(jobId);

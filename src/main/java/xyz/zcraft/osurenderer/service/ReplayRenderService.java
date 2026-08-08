@@ -155,6 +155,62 @@ public final class ReplayRenderService implements Closeable {
         return executor.getActiveCount();
     }
 
+    public ServiceStatus status() {
+        EnumMap<JobStatus, Long> counts = new EnumMap<>(JobStatus.class);
+        for (JobStatus value : JobStatus.values()) {
+            counts.put(value, 0L);
+        }
+        jobs.values().forEach(job -> counts.compute(job.status(), (_, count) -> count + 1));
+        return new ServiceStatus(
+                executor.getQueue().size(),
+                executor.getActiveCount(),
+                executor.getMaximumPoolSize(),
+                executor.getCompletedTaskCount(),
+                jobs.size(),
+                Map.copyOf(counts)
+        );
+    }
+
+    public List<JobProgress> listJobs() {
+        return jobs.values().stream()
+                .sorted(Comparator.comparing(JobProgress::id))
+                .toList();
+    }
+
+    public RenderAssetCache.CacheSummary cacheSummary() {
+        return assetCache.summary();
+    }
+
+    public boolean hasCachedAsset(RenderAssetCache.CacheType type, long id) {
+        return switch (type) {
+            case BEATMAPSET -> hasBeatmapset(id);
+            case REPLAY -> hasReplay(id);
+        };
+    }
+
+    public boolean removeCachedAsset(RenderAssetCache.CacheType type, long id) throws IOException {
+        return assetCache.remove(type, id);
+    }
+
+    public int clearCache(RenderAssetCache.CacheSelection selection) throws IOException {
+        return assetCache.clear(selection);
+    }
+
+    public CacheControlResult controlCache(CacheControlRequest request) {
+        if (request == null) throw new IllegalArgumentException("Cache control body is required");
+        return assetCache.control(request.operation(), request.type(), request.id());
+    }
+
+    public CacheControlResult storeFetchedCache(String type, long id, InputStream input) throws IOException {
+        return assetCache.storeFetched(type, id, input);
+    }
+
+    public int cleanupNow() {
+        int before = jobs.size();
+        cleanupExpiredJobs();
+        return before - jobs.size();
+    }
+
     public JobProgress getProgress(String jobId) {
         return jobs.get(jobId);
     }
@@ -396,5 +452,15 @@ public final class ReplayRenderService implements Closeable {
     public void close() {
         executor.shutdownNow();
         cleanupExecutor.shutdownNow();
+    }
+
+    public record ServiceStatus(
+            int queued,
+            int active,
+            int poolSize,
+            long completed,
+            int trackedJobs,
+            Map<JobStatus, Long> jobsByStatus
+    ) {
     }
 }

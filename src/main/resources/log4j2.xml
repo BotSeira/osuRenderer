@@ -1,23 +1,56 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="WARN">
+    <Properties>
+        <Property name="CONSOLE_PATTERN">%d{HH:mm:ss.S} [%t] %highlight{%-5p} %logger{1} - %msg%n%ex{none}</Property>
+        <Property name="FILE_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5p %logger - %msg%n%xEx</Property>
+    </Properties>
     <Appenders>
-        <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{HH:mm:ss} %-5level %c{1} - %msg%n"/>
+        <Console name="CONSOLE" target="SYSTEM_OUT">
+            <PatternLayout pattern="${CONSOLE_PATTERN}"/>
         </Console>
-        <RollingFile name="Danser" fileName="logs/danser.log"
-                     filePattern="logs/danser-%d{yyyy-MM-dd}-%i.log.gz">
-            <PatternLayout pattern="%d %msg%n"/>
+        <RollingFile name="FILE" fileName="logs/latest.log"
+                     filePattern="logs/%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_PATTERN}"/>
             <Policies>
-                <SizeBasedTriggeringPolicy size="20 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="10 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" compressionLevel="9" fileIndex="nomax"/>
+        </RollingFile>
+        <RollingFile name="ERROR_FILE" fileName="logs/error.log"
+                     filePattern="logs/%d{yyyy-MM-dd}-error-%i.log.gz">
+            <PatternLayout pattern="${FILE_PATTERN}"/>
+            <Filters><ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/></Filters>
+            <Policies><SizeBasedTriggeringPolicy size="10 MB"/></Policies>
+        </RollingFile>
+        <RollingFile name="DANSER_FILE" fileName="logs/danser.log"
+                     filePattern="logs/danser-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %msg%n"/>
+            <Policies><SizeBasedTriggeringPolicy size="20 MB"/></Policies>
+        </RollingFile>
+        <RollingFile name="JAVALIN_FILE" fileName="logs/javalin-server.log"
+                     filePattern="logs/javalin-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_PATTERN}"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="10 MB"/>
             </Policies>
         </RollingFile>
     </Appenders>
     <Loggers>
         <Logger name="danser" level="info" additivity="false">
-            <AppenderRef ref="Danser"/>
+            <AppenderRef ref="DANSER_FILE"/>
+        </Logger>
+        <Logger name="io.javalin" level="info" additivity="false">
+            <AppenderRef ref="JAVALIN_FILE"/>
+        </Logger>
+        <Logger name="org.eclipse.jetty" level="info" additivity="false">
+            <AppenderRef ref="JAVALIN_FILE"/>
         </Logger>
         <Root level="info">
-            <AppenderRef ref="Console"/>
+            <AppenderRef ref="CONSOLE"/>
+            <AppenderRef ref="FILE"/>
+            <AppenderRef ref="ERROR_FILE"/>
         </Root>
     </Loggers>
 </Configuration>
