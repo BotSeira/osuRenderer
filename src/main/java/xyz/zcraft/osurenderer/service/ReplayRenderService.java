@@ -24,6 +24,11 @@ public final class ReplayRenderService implements Closeable {
     private static final Logger DANSER_LOG = LogManager.getLogger("danser");
     private static final Pattern DANSER_PROGRESS_PATTERN =
             Pattern.compile("Progress: (\\d+)%, Speed: ([\\d.]+)x, ETA: (.+)");
+    private static final Pattern DANSER_ERROR_PATTERN = Pattern.compile(
+            "(?i)(?:error|fail(?:ed|ure)?|not found|unable|cannot|can't|panic|fatal|closing)");
+    private static final Pattern ANSI_ESCAPE_PATTERN = Pattern.compile("\\x1B\\[[0-?]*[ -/]*[@-~]");
+    private static final int DANSER_OUTPUT_TAIL_LINES = 12;
+    private static final long DANSER_OUTPUT_DRAIN_SECONDS = 5;
 
     private final RendererConfig config;
     private final Path danserPath;
@@ -379,28 +384,52 @@ public final class ReplayRenderService implements Closeable {
 
         Process process = processBuilder.redirectErrorStream(true).start();
 
-        consumeDanserOutput(process.getInputStream(), jobId);
+        DanserOutputCapture output = consumeDanserOutput(process.getInputStream(), jobId);
 
         boolean finished = process.waitFor(config.renderTimeoutMinutes(), TimeUnit.MINUTES);
         if (!finished) {
             process.destroyForcibly();
+            process.waitFor();
+            awaitDanserOutput(output, jobId);
             update(jobId, new JobProgress(jobId, JobStatus.TIMEOUT, null, null, null,
                     "Render timed out", null));
             LOG.error("Render job {} timed out", jobId);
             return null;
         }
+        List<String> outputTail = awaitDanserOutput(output, jobId);
         if (process.exitValue() != 0 || !Files.isRegularFile(video)) {
-            throw new IOException("Danser exited with code " + process.exitValue() + " without a video");
+            throw new IOException(danserFailureMessage(process.exitValue(), outputTail));
         }
 
         return video;
     }
 
-    private void consumeDanserOutput(InputStream input, String jobId) {
+    static String danserFailureMessage(int exitCode, List<String> outputTail) {
+        if (outputTail != null) {
+            for (int i = outputTail.size() - 1; i >= 0; i--) {
+                String line = ANSI_ESCAPE_PATTERN.matcher(outputTail.get(i)).replaceAll("").trim();
+                if (!line.isEmpty() && DANSER_ERROR_PATTERN.matcher(line).find()) {
+                    return line;
+                }
+            }
+        }
+        return "Danser exited with code " + exitCode + " without a video";
+    }
+
+    private List<String> awaitDanserOutput(DanserOutputCapture output, String jobId) throws InterruptedException {
+        if (!output.await(DANSER_OUTPUT_DRAIN_SECONDS, TimeUnit.SECONDS)) {
+            DANSER_LOG.warn("Timed out waiting for Danser output to close for {}", jobId);
+        }
+        return output.snapshot();
+    }
+
+    private DanserOutputCapture consumeDanserOutput(InputStream input, String jobId) {
+        DanserOutputCapture output = new DanserOutputCapture();
         Thread.ofVirtual().name("danser-output-" + jobId).start(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    output.add(line);
                     Matcher matcher = DANSER_PROGRESS_PATTERN.matcher(line);
                     if (matcher.find()) {
                         update(jobId, new JobProgress(
@@ -416,8 +445,35 @@ public final class ReplayRenderService implements Closeable {
                 }
             } catch (IOException e) {
                 DANSER_LOG.warn("Failed to consume Danser output for {}", jobId, e);
+            } finally {
+                output.complete();
             }
         });
+        return output;
+    }
+
+    private static final class DanserOutputCapture {
+        private final ArrayDeque<String> tail = new ArrayDeque<>(DANSER_OUTPUT_TAIL_LINES);
+        private final CountDownLatch completion = new CountDownLatch(1);
+
+        private synchronized void add(String line) {
+            if (tail.size() == DANSER_OUTPUT_TAIL_LINES) {
+                tail.removeFirst();
+            }
+            tail.addLast(line);
+        }
+
+        private void complete() {
+            completion.countDown();
+        }
+
+        private boolean await(long timeout, TimeUnit unit) throws InterruptedException {
+            return completion.await(timeout, unit);
+        }
+
+        private synchronized List<String> snapshot() {
+            return List.copyOf(tail);
+        }
     }
 
     private void fail(String jobId, String message, Exception error) {
