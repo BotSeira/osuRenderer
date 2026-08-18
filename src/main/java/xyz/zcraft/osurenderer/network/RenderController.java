@@ -55,8 +55,19 @@ public final class RenderController {
         try {
             return RenderRequest.Mode.valueOf(value.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("mode must be single or showcase");
+            throw new IllegalArgumentException("mode must be single, showcase or autoplay");
         }
+    }
+
+    private static String parseMods(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String mods = value.trim().toUpperCase(Locale.ROOT);
+        if (!mods.matches("(?:[A-Z0-9]{2})*")) {
+            throw new IllegalArgumentException("mods must contain two-character acronyms");
+        }
+        return mods;
     }
 
     private static double parseOptionalDouble(String value) {
@@ -123,17 +134,19 @@ public final class RenderController {
         RenderRequest.Mode mode = parseMode(context.formParam("mode"));
         UploadedFile configUpload = requireUpload(context, "config");
         String beatmapId = context.formParam("beatmapId");
+        String mods = parseMods(context.formParam("mods"));
         QqUploadRequest qqUpload = parseQqUpload(context.formParam("qqUpload"));
-        if (mode == RenderRequest.Mode.SHOWCASE && (beatmapId == null || beatmapId.isBlank())) {
-            throw new IllegalArgumentException("beatmapId is required for showcase renders");
+        if (mode != RenderRequest.Mode.SINGLE && (beatmapId == null || beatmapId.isBlank())) {
+            throw new IllegalArgumentException("beatmapId is required for showcase and autoplay renders");
         }
         if (context.formParam("beatmapsetId") == null) {
-            createLegacy(context, mode, beatmapId, configUpload, qqUpload);
+            createLegacy(context, mode, beatmapId, mods, configUpload, qqUpload);
             return;
         }
 
         long beatmapsetId = requirePositiveLong(context.formParam("beatmapsetId"), "beatmapsetId");
-        List<Long> replayIds = parseIds(context.formParam("replayIds"), "replayIds", false);
+        List<Long> replayIds = parseIds(
+                context.formParam("replayIds"), "replayIds", mode == RenderRequest.Mode.AUTOPLAY);
         List<Long> replayUploadIds = parseIds(context.formParam("replayUploadIds"), "replayUploadIds", true);
         UploadedFile beatmapsetUpload = context.uploadedFile("beatmapset");
         List<UploadedFile> replayUploads = context.uploadedFiles("replays");
@@ -145,6 +158,12 @@ public final class RenderController {
         }
         if (mode == RenderRequest.Mode.SINGLE && replayIds.size() != 1) {
             throw new IllegalArgumentException("Single renders require exactly one replay id");
+        }
+        if (mode == RenderRequest.Mode.SHOWCASE && replayIds.isEmpty()) {
+            throw new IllegalArgumentException("Showcase renders require at least one replay id");
+        }
+        if (mode == RenderRequest.Mode.AUTOPLAY && !replayIds.isEmpty()) {
+            throw new IllegalArgumentException("Autoplay renders must not include replay ids");
         }
         if (new HashSet<>(replayIds).size() != replayIds.size()) {
             throw new IllegalArgumentException("replayIds must be unique");
@@ -195,6 +214,7 @@ public final class RenderController {
                     config,
                     parseOptionalDouble(context.formParam("start")),
                     parseOptionalDouble(context.formParam("end")),
+                    mods,
                     workspace,
                     qqUpload);
             respondQueued(context, service.queue(request));
@@ -204,11 +224,11 @@ public final class RenderController {
         }
     }
 
-    private void createLegacy(Context context, RenderRequest.Mode mode, String beatmapId,
+    private void createLegacy(Context context, RenderRequest.Mode mode, String beatmapId, String mods,
                               UploadedFile configUpload, QqUploadRequest qqUpload) throws IOException {
         UploadedFile beatmapsetUpload = requireUpload(context, "beatmapset");
         List<UploadedFile> replayUploads = context.uploadedFiles("replays");
-        if (replayUploads.isEmpty()) {
+        if (mode != RenderRequest.Mode.AUTOPLAY && replayUploads.isEmpty()) {
             throw new IllegalArgumentException("At least one replay file is required");
         }
         if (mode == RenderRequest.Mode.SINGLE && replayUploads.size() != 1) {
@@ -233,6 +253,7 @@ public final class RenderController {
                     config,
                     parseOptionalDouble(context.formParam("start")),
                     parseOptionalDouble(context.formParam("end")),
+                    mods,
                     workspace,
                     qqUpload);
             respondQueued(context, service.queue(request));

@@ -240,20 +240,13 @@ public final class ReplayRenderService implements Closeable {
         try {
             List<String> command = new ArrayList<>();
             settingsFile = prepareDanser(command, request);
-            String outputName = (request.mode() == RenderRequest.Mode.SINGLE ? "replay_" : "showcase_") + request.id();
+            String outputName = switch (request.mode()) {
+                case SINGLE -> "replay_";
+                case SHOWCASE -> "showcase_";
+                case AUTOPLAY -> "preview_";
+            } + request.id();
 
-            if (request.mode() == RenderRequest.Mode.SINGLE) {
-                if (!Double.isNaN(request.start())) {
-                    command.add("-start=" + request.start());
-                }
-                if (!Double.isNaN(request.end())) {
-                    command.add("-end=" + request.end());
-                }
-                command.add("-replay=" + request.replays().getFirst().toAbsolutePath());
-            } else {
-                command.add("-knockout2=" + replayList(request.replays()));
-                command.add("-id=" + request.beatmapId());
-            }
+            command.addAll(modeArguments(request));
             command.add("-out=" + outputName);
 
             Path video = runDanser(request.id(), outputName, command);
@@ -298,6 +291,32 @@ public final class ReplayRenderService implements Closeable {
         }
     }
 
+    static List<String> modeArguments(RenderRequest request) {
+        List<String> arguments = new ArrayList<>();
+        if (request.mode() == RenderRequest.Mode.SINGLE) {
+            if (!Double.isNaN(request.start())) {
+                arguments.add("-start=" + request.start());
+            }
+            if (!Double.isNaN(request.end())) {
+                arguments.add("-end=" + request.end());
+            }
+            arguments.add("-replay=" + request.replays().getFirst().toAbsolutePath());
+        } else if (request.mode() == RenderRequest.Mode.SHOWCASE) {
+            arguments.add("-knockout2=" + replayList(request.replays()));
+            arguments.add("-id=" + request.beatmapId());
+        } else {
+            if (!Double.isNaN(request.start())) {
+                arguments.add("-start=" + request.start());
+            }
+            if (!Double.isNaN(request.end())) {
+                arguments.add("-end=" + request.end());
+            }
+            arguments.add("-id=" + request.beatmapId());
+            arguments.add("-mods=AT" + Objects.requireNonNullElse(request.mods(), ""));
+        }
+        return arguments;
+    }
+
     private Path prepareDanser(List<String> command, RenderRequest request) throws IOException {
         final String e = System.getProperty("os.name").toLowerCase().contains("win")
                 ? config.danserRuntime().commandPrefixWin() : config.danserRuntime().commandPrefix();
@@ -334,7 +353,7 @@ public final class ReplayRenderService implements Closeable {
         return settingsFile;
     }
 
-    private String replayList(List<Path> replayPaths) {
+    private static String replayList(List<Path> replayPaths) {
         String value = replayPaths.stream()
                 .map(path -> "\"" + path.toAbsolutePath().toString().replace("\\", "/") + "\"")
                 .reduce((left, right) -> left + "," + right)

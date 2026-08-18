@@ -11,11 +11,13 @@ public record RenderRequest(
         Path config,
         double start,
         double end,
+        String mods,
         Path workspace,
         QqUploadRequest qqUpload
 ) {
     public enum Mode {
         SINGLE,
-        SHOWCASE
+        SHOWCASE,
+        AUTOPLAY
     }
 }
