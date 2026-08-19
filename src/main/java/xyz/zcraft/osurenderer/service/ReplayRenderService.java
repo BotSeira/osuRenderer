@@ -27,7 +27,7 @@ public final class ReplayRenderService implements Closeable {
     private static final Pattern DANSER_ERROR_PATTERN = Pattern.compile(
             "(?i)(?:error|fail(?:ed|ure)?|not found|unable|cannot|can't|panic|fatal|closing)");
     private static final Pattern ANSI_ESCAPE_PATTERN = Pattern.compile("\\x1B\\[[0-?]*[ -/]*[@-~]");
-    private static final int DANSER_OUTPUT_TAIL_LINES = 12;
+    private static final int DANSER_OUTPUT_TAIL_LINES = 64;
     private static final long DANSER_OUTPUT_DRAIN_SECONDS = 5;
 
     private final RendererConfig config;
