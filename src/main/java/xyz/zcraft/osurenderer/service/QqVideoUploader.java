@@ -149,7 +149,7 @@ public final class QqVideoUploader {
         JsonObject uploadConfig = data.has("upload_config") && data.get("upload_config").isJsonObject()
                 ? data.getAsJsonObject("upload_config") : new JsonObject();
         int concurrency = uploadConfig.has("concurrency") ? uploadConfig.get("concurrency").getAsInt() : 1;
-        int retryTimeout = uploadConfig.has("retry_timeout") ? uploadConfig.get("retry_timeout").getAsInt() : 300;
+        int retryTimeout = uploadConfig.has("retry_timeout") ? uploadConfig.get("retry_timeout").getAsInt() : 100;
         int retryDelay = uploadConfig.has("retry_delay") ? uploadConfig.get("retry_delay").getAsInt() : 1;
         return new UploadPrepare(uploadId, blockSize, List.copyOf(parts), Math.max(1, concurrency),
                 Math.max(1, retryTimeout), Math.max(1, retryDelay));
