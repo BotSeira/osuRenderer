@@ -104,7 +104,7 @@ public final class RendererConsoleProcessor {
         String detail = switch (topic) {
             case "status" -> "status\nShows the web server, HTTP counters, renderer pool, jobs, and cache.";
             case "queue" -> "queue\nShows active workers, configured pool size, waiting jobs, and completed tasks.";
-            case "jobs" -> "jobs [queued|rendering|uploading|done|failed|timeout]\nLists tracked jobs.";
+            case "jobs" -> "jobs [queued|rendering|uploading|canceled|done|failed|timeout]\nLists tracked jobs.";
             case "job" -> "job show <uuid>\njob delete <uuid> confirm\nDeletion removes metadata and any result file.";
             case "cache" -> "cache <query|delete|get|fetch> <score|beatmap|beatmapset|replay> <id>\nfetch must be initiated from oStella or SeiraCore because workers intentionally have no upstream credentials.\ncache status\ncache has <beatmapset|replay> <id>\ncache remove <type> <id> confirm\ncache clear <beatmapsets|replays|all> confirm";
             case "cleanup" -> "cleanup now\nRuns the configured result-TTL cleanup immediately.";

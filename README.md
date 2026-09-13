@@ -57,6 +57,7 @@ of a render request and are never returned by status endpoints or written to the
 | POST | `/renders` | Multipart render submission |
 | GET | `/renders/{jobId}/status` | Job progress |
 | GET | `/renders/{jobId}/video` | MP4 result |
+| POST | `/renders/{jobId}/cancel` | Cancel a queued or active render job |
 | DELETE | `/renders/{jobId}` | Remove result and metadata |
 
 All endpoints except `/health` require `Authorization: Bearer <apiKey>` when an

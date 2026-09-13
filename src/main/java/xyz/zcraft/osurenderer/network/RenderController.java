@@ -340,6 +340,17 @@ public final class RenderController {
         context.contentType("video/mp4").result(video);
     }
 
+    public void cancel(Context context) throws IOException {
+        JobProgress progress = service.cancelJob(context.pathParam("jobId"));
+        if (progress == null) {
+            context.status(404).result("Job not found");
+            return;
+        }
+        JsonObject response = GSON.toJsonTree(progress).getAsJsonObject();
+        response.addProperty("status", progress.status().name().toLowerCase(Locale.ROOT));
+        context.contentType("application/json").result(response.toString());
+    }
+
     public void delete(Context context) throws IOException {
         service.deleteJob(context.pathParam("jobId"));
         context.status(204);

@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -40,6 +41,8 @@ public final class ReplayRenderService implements Closeable {
     private final Map<String, JobProgress> jobs = new ConcurrentHashMap<>();
     private final Map<String, Path> results = new ConcurrentHashMap<>();
     private final Map<String, Long> touchedAt = new ConcurrentHashMap<>();
+    private final Map<String, FutureTask<Void>> jobTasks = new ConcurrentHashMap<>();
+    private final Map<String, Process> jobProcesses = new ConcurrentHashMap<>();
 
     public ReplayRenderService(RendererConfig config) throws IOException {
         this(config, new QqVideoUploader());
@@ -141,9 +144,24 @@ public final class ReplayRenderService implements Closeable {
     public QueuedJob queue(RenderRequest request) {
         jobs.put(request.id(), new JobProgress(request.id(), JobStatus.QUEUED));
         touch(request.id());
+        AtomicBoolean started = new AtomicBoolean();
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            started.set(true);
+            render(request);
+        }, null) {
+            @Override
+            protected void done() {
+                jobTasks.remove(request.id(), this);
+                if (isCancelled() && !started.get()) {
+                    deleteTree(request.workspace());
+                }
+            }
+        };
+        jobTasks.put(request.id(), task);
         try {
-            executor.execute(() -> render(request));
+            executor.execute(task);
         } catch (RejectedExecutionException e) {
+            jobTasks.remove(request.id(), task);
             jobs.remove(request.id());
             touchedAt.remove(request.id());
             deleteTree(request.workspace());
@@ -229,7 +247,39 @@ public final class ReplayRenderService implements Closeable {
         return Files.newInputStream(result);
     }
 
+    public JobProgress cancelJob(String jobId) throws IOException {
+        while (true) {
+            JobProgress current = jobs.get(jobId);
+            if (current == null || isTerminal(current.status())) {
+                return current;
+            }
+            JobProgress canceled = new JobProgress(
+                    jobId, JobStatus.CANCELED, null, null, null, "Canceled by user", null);
+            if (!jobs.replace(jobId, current, canceled)) {
+                continue;
+            }
+
+            touch(jobId);
+            FutureTask<Void> task = jobTasks.get(jobId);
+            if (task != null) {
+                executor.remove(task);
+                task.cancel(true);
+            }
+            Process process = jobProcesses.get(jobId);
+            if (process != null && process.isAlive()) {
+                terminateProcess(process);
+            }
+            Path result = results.remove(jobId);
+            if (result != null) {
+                Files.deleteIfExists(result);
+            }
+            LOG.info("Canceled render job {} while it was {}", jobId, current.status());
+            return canceled;
+        }
+    }
+
     public void deleteJob(String jobId) throws IOException {
+        cancelJob(jobId);
         Path result = results.remove(jobId);
         jobs.remove(jobId);
         touchedAt.remove(jobId);
@@ -240,7 +290,14 @@ public final class ReplayRenderService implements Closeable {
     }
 
     private void render(RenderRequest request) {
-        update(request.id(), new JobProgress(request.id(), JobStatus.RENDERING));
+        JobProgress queued = jobs.get(request.id());
+        JobProgress rendering = new JobProgress(request.id(), JobStatus.RENDERING);
+        if (queued == null || queued.status() != JobStatus.QUEUED
+                || !jobs.replace(request.id(), queued, rendering)) {
+            deleteTree(request.workspace());
+            return;
+        }
+        touch(request.id());
         Path settingsFile = null;
         try {
             List<String> command = new ArrayList<>();
@@ -255,10 +312,16 @@ public final class ReplayRenderService implements Closeable {
             command.add("-out=" + outputName);
 
             Path video = runDanser(request.id(), outputName, command);
-            if (video == null) {
+            if (video == null || isCanceled(request.id())) {
+                if (video != null) Files.deleteIfExists(video);
                 return;
             }
             results.put(request.id(), video);
+            if (isCanceled(request.id())) {
+                results.remove(request.id(), video);
+                Files.deleteIfExists(video);
+                return;
+            }
 
             QqFileInfo qqFile = null;
             String uploadError = null;
@@ -281,9 +344,13 @@ public final class ReplayRenderService implements Closeable {
             LOG.info("Finished render job {}", request.id());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            fail(request.id(), "Render interrupted", e);
+            if (!isCanceled(request.id())) {
+                fail(request.id(), "Render interrupted", e);
+            }
         } catch (Exception e) {
-            fail(request.id(), e.getMessage() == null ? "Danser failed" : e.getMessage(), e);
+            if (!isCanceled(request.id())) {
+                fail(request.id(), e.getMessage() == null ? "Danser failed" : e.getMessage(), e);
+            }
         } finally {
             if (settingsFile != null) {
                 try {
@@ -383,25 +450,35 @@ public final class ReplayRenderService implements Closeable {
         if (m != null) processBuilder.environment().putAll(m);
 
         Process process = processBuilder.redirectErrorStream(true).start();
+        jobProcesses.put(jobId, process);
+        try {
+            DanserOutputCapture output = consumeDanserOutput(process.getInputStream(), jobId);
 
-        DanserOutputCapture output = consumeDanserOutput(process.getInputStream(), jobId);
-
-        boolean finished = process.waitFor(config.renderTimeoutMinutes(), TimeUnit.MINUTES);
-        if (!finished) {
-            process.destroyForcibly();
-            process.waitFor();
-            awaitDanserOutput(output, jobId);
-            update(jobId, new JobProgress(jobId, JobStatus.TIMEOUT, null, null, null,
-                    "Render timed out", null));
-            LOG.error("Render job {} timed out", jobId);
-            return null;
+            boolean finished = process.waitFor(config.renderTimeoutMinutes(), TimeUnit.MINUTES);
+            if (!finished) {
+                terminateProcess(process);
+                process.waitFor();
+                awaitDanserOutput(output, jobId);
+                update(jobId, new JobProgress(jobId, JobStatus.TIMEOUT, null, null, null,
+                        "Render timed out", null));
+                LOG.error("Render job {} timed out", jobId);
+                return null;
+            }
+            List<String> outputTail = awaitDanserOutput(output, jobId);
+            if (isCanceled(jobId)) {
+                Files.deleteIfExists(video);
+                return null;
+            }
+            if (process.exitValue() != 0 || !Files.isRegularFile(video)) {
+                throw new IOException(danserFailureMessage(process.exitValue(), outputTail));
+            }
+            return video;
+        } catch (InterruptedException e) {
+            terminateProcess(process);
+            throw e;
+        } finally {
+            jobProcesses.remove(jobId, process);
         }
-        List<String> outputTail = awaitDanserOutput(output, jobId);
-        if (process.exitValue() != 0 || !Files.isRegularFile(video)) {
-            throw new IOException(danserFailureMessage(process.exitValue(), outputTail));
-        }
-
-        return video;
     }
 
     static String danserFailureMessage(int exitCode, List<String> outputTail) {
@@ -482,8 +559,26 @@ public final class ReplayRenderService implements Closeable {
     }
 
     private void update(String jobId, JobProgress progress) {
-        jobs.put(jobId, progress);
-        touch(jobId);
+        jobs.computeIfPresent(jobId, (_, current) ->
+                current.status() == JobStatus.CANCELED ? current : progress);
+        if (jobs.containsKey(jobId)) touch(jobId);
+    }
+
+    private boolean isCanceled(String jobId) {
+        JobProgress progress = jobs.get(jobId);
+        return progress != null && progress.status() == JobStatus.CANCELED;
+    }
+
+    private static void terminateProcess(Process process) {
+        process.descendants().forEach(child -> {
+            if (child.isAlive()) child.destroyForcibly();
+        });
+        if (process.isAlive()) process.destroyForcibly();
+    }
+
+    private static boolean isTerminal(JobStatus status) {
+        return status == JobStatus.CANCELED || status == JobStatus.TIMEOUT
+                || status == JobStatus.FAILED || status == JobStatus.DONE;
     }
 
     private void touch(String jobId) {

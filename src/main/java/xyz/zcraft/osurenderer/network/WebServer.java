@@ -52,6 +52,7 @@ public final class WebServer implements Closeable {
                     .post("/renders", controller::create)
                     .get("/renders/{jobId}/status", controller::status)
                     .get("/renders/{jobId}/video", controller::video)
+                    .post("/renders/{jobId}/cancel", controller::cancel)
                     .delete("/renders/{jobId}", controller::delete)
                     .exception(QueueFullException.class, (error, context) ->
                             fail(context, 429, error.getMessage()))

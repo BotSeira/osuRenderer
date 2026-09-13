@@ -4,6 +4,7 @@ public enum JobStatus {
     QUEUED,
     RENDERING,
     UPLOADING,
+    CANCELED,
     TIMEOUT,
     FAILED,
     DONE
