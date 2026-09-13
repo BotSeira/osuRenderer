@@ -36,12 +36,14 @@ public final class ReplayRenderService implements Closeable {
     private final Path jobsPath;
     private final RenderAssetCache assetCache;
     private final QqVideoUploader qqVideoUploader;
-    private final ThreadPoolExecutor executor;
+    private final ThreadPoolExecutor renderExecutor;
+    private final ThreadPoolExecutor uploadExecutor;
     private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, JobProgress> jobs = new ConcurrentHashMap<>();
     private final Map<String, Path> results = new ConcurrentHashMap<>();
     private final Map<String, Long> touchedAt = new ConcurrentHashMap<>();
-    private final Map<String, FutureTask<Void>> jobTasks = new ConcurrentHashMap<>();
+    private final Map<String, FutureTask<Void>> renderTasks = new ConcurrentHashMap<>();
+    private final Map<String, FutureTask<Void>> uploadTasks = new ConcurrentHashMap<>();
     private final Map<String, Process> jobProcesses = new ConcurrentHashMap<>();
 
     public ReplayRenderService(RendererConfig config) throws IOException {
@@ -62,13 +64,20 @@ public final class ReplayRenderService implements Closeable {
         Files.createDirectories(jobsPath);
 
         int threads = config.renderThreads();
-        this.executor = new ThreadPoolExecutor(
+        this.renderExecutor = new ThreadPoolExecutor(
                 threads,
                 threads,
                 0L,
                 TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(config.renderQueueSize()),
                 new ThreadPoolExecutor.AbortPolicy());
+        int uploadThreads = config.uploadThreads();
+        this.uploadExecutor = new ThreadPoolExecutor(
+                uploadThreads,
+                uploadThreads,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>());
 
         cleanupExecutor.scheduleAtFixedRate(this::cleanupExpiredJobs, 1, 1, TimeUnit.MINUTES);
     }
@@ -151,31 +160,31 @@ public final class ReplayRenderService implements Closeable {
         }, null) {
             @Override
             protected void done() {
-                jobTasks.remove(request.id(), this);
+                renderTasks.remove(request.id(), this);
                 if (isCancelled() && !started.get()) {
                     deleteTree(request.workspace());
                 }
             }
         };
-        jobTasks.put(request.id(), task);
+        renderTasks.put(request.id(), task);
         try {
-            executor.execute(task);
+            renderExecutor.execute(task);
         } catch (RejectedExecutionException e) {
-            jobTasks.remove(request.id(), task);
+            renderTasks.remove(request.id(), task);
             jobs.remove(request.id());
             touchedAt.remove(request.id());
             deleteTree(request.workspace());
             throw new QueueFullException();
         }
-        return new QueuedJob(request.id(), Math.max(1, executor.getQueue().size()));
+        return new QueuedJob(request.id(), Math.max(1, renderExecutor.getQueue().size()));
     }
 
     public int queueSize() {
-        return executor.getQueue().size();
+        return renderExecutor.getQueue().size();
     }
 
     public int activeCount() {
-        return executor.getActiveCount();
+        return renderExecutor.getActiveCount();
     }
 
     public ServiceStatus status() {
@@ -185,10 +194,14 @@ public final class ReplayRenderService implements Closeable {
         }
         jobs.values().forEach(job -> counts.compute(job.status(), (_, count) -> count + 1));
         return new ServiceStatus(
-                executor.getQueue().size(),
-                executor.getActiveCount(),
-                executor.getMaximumPoolSize(),
-                executor.getCompletedTaskCount(),
+                renderExecutor.getQueue().size(),
+                renderExecutor.getActiveCount(),
+                renderExecutor.getMaximumPoolSize(),
+                renderExecutor.getCompletedTaskCount(),
+                uploadExecutor.getQueue().size(),
+                uploadExecutor.getActiveCount(),
+                uploadExecutor.getMaximumPoolSize(),
+                uploadExecutor.getCompletedTaskCount(),
                 jobs.size(),
                 Map.copyOf(counts)
         );
@@ -260,11 +273,8 @@ public final class ReplayRenderService implements Closeable {
             }
 
             touch(jobId);
-            FutureTask<Void> task = jobTasks.get(jobId);
-            if (task != null) {
-                executor.remove(task);
-                task.cancel(true);
-            }
+            cancelTask(renderTasks.get(jobId), renderExecutor);
+            cancelTask(uploadTasks.get(jobId), uploadExecutor);
             Process process = jobProcesses.get(jobId);
             if (process != null && process.isAlive()) {
                 terminateProcess(process);
@@ -323,25 +333,12 @@ public final class ReplayRenderService implements Closeable {
                 return;
             }
 
-            QqFileInfo qqFile = null;
-            String uploadError = null;
             if (request.qqUpload() != null) {
-                update(request.id(), new JobProgress(request.id(), JobStatus.UPLOADING));
-                try {
-                    qqFile = qqVideoUploader.upload(video, request.qqUpload());
-                    LOG.info("Uploaded render job {} to QQ", request.id());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    uploadError = "QQ upload interrupted";
-                    LOG.warn("QQ upload interrupted for render job {}", request.id(), e);
-                } catch (Exception e) {
-                    uploadError = e.getMessage() == null ? "QQ upload failed" : e.getMessage();
-                    LOG.warn("Failed to upload render job {} to QQ; the video remains available", request.id(), e);
-                }
+                queueUpload(request, video);
+            } else {
+                update(request.id(), new JobProgress(request.id(), JobStatus.DONE));
+                LOG.info("Finished render job {}", request.id());
             }
-            update(request.id(), new JobProgress(
-                    request.id(), JobStatus.DONE, null, null, null, uploadError, qqFile));
-            LOG.info("Finished render job {}", request.id());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             if (!isCanceled(request.id())) {
@@ -360,6 +357,63 @@ public final class ReplayRenderService implements Closeable {
                 }
             }
             deleteTree(request.workspace());
+        }
+    }
+
+    private void queueUpload(RenderRequest request, Path video) {
+        update(request.id(), new JobProgress(request.id(), JobStatus.UPLOAD_QUEUED));
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            upload(request, video);
+        }, null) {
+            @Override
+            protected void done() {
+                uploadTasks.remove(request.id(), this);
+            }
+        };
+        uploadTasks.put(request.id(), task);
+        try {
+            uploadExecutor.execute(task);
+        } catch (RejectedExecutionException e) {
+            uploadTasks.remove(request.id(), task);
+            if (!isCanceled(request.id())) {
+                fail(request.id(), "Upload queue is unavailable", e);
+            }
+        }
+    }
+
+    private void upload(RenderRequest request, Path video) {
+        JobProgress queued = jobs.get(request.id());
+        JobProgress uploading = new JobProgress(request.id(), JobStatus.UPLOADING);
+        if (queued == null || queued.status() != JobStatus.UPLOAD_QUEUED
+                || !jobs.replace(request.id(), queued, uploading)) {
+            return;
+        }
+        touch(request.id());
+        QqFileInfo qqFile = null;
+        String uploadError = null;
+        try {
+            qqFile = qqVideoUploader.upload(video, request.qqUpload());
+            LOG.info("Uploaded render job {} to QQ", request.id());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            if (isCanceled(request.id())) {
+                return;
+            }
+            uploadError = "QQ upload interrupted";
+            LOG.warn("QQ upload interrupted for render job {}", request.id(), e);
+        } catch (Exception e) {
+            uploadError = e.getMessage() == null ? "QQ upload failed" : e.getMessage();
+            LOG.warn("Failed to upload render job {} to QQ; the video remains available", request.id(), e);
+        }
+        update(request.id(), new JobProgress(
+                request.id(), JobStatus.DONE, null, null, null, uploadError, qqFile));
+        LOG.info("Finished render job {}", request.id());
+    }
+
+    private static void cancelTask(FutureTask<Void> task, ThreadPoolExecutor executor) {
+        if (task != null) {
+            executor.remove(task);
+            task.cancel(true);
         }
     }
 
@@ -594,6 +648,7 @@ public final class ReplayRenderService implements Closeable {
             JobProgress progress = jobs.get(entry.getKey());
             if (progress != null && (progress.status() == JobStatus.QUEUED
                     || progress.status() == JobStatus.RENDERING
+                    || progress.status() == JobStatus.UPLOAD_QUEUED
                     || progress.status() == JobStatus.UPLOADING)) {
                 continue;
             }
@@ -620,7 +675,8 @@ public final class ReplayRenderService implements Closeable {
 
     @Override
     public void close() {
-        executor.shutdownNow();
+        renderExecutor.shutdownNow();
+        uploadExecutor.shutdownNow();
         cleanupExecutor.shutdownNow();
     }
 
@@ -629,6 +685,10 @@ public final class ReplayRenderService implements Closeable {
             int active,
             int poolSize,
             long completed,
+            int uploadQueued,
+            int uploadActive,
+            int uploadPoolSize,
+            long uploadCompleted,
             int trackedJobs,
             Map<JobStatus, Long> jobsByStatus
     ) {

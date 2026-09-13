@@ -20,8 +20,12 @@ Danser in a bounded worker pool, exposes progress and the MP4 result, and remove
 only the temporary workspace after the process exits. Video results expire
 according to `resultTtlMinutes`; render inputs remain under `renderer.cachePath`.
 
-When `qqUpload` is supplied with a render request, the job enters an `uploading`
-state after Danser finishes. osuRenderer uploads the local MP4 through QQ's
+When `qqUpload` is supplied with a render request, the job enters an
+`upload_queued` state after Danser finishes and then `uploading` when an upload
+worker is available. Rendering and uploading use independent worker pools, so a
+new render can start while an earlier result is uploading. The upload waiting
+queue is unlimited and `renderer.uploadThreads` controls upload concurrency.
+osuRenderer uploads the local MP4 through QQ's
 multipart upload API and exposes the resulting `file_uuid`, `file_info`, and
 `ttl` as `qqFile` in the completed job status. If no credentials are supplied,
 rendering behaves exactly as before. If QQ upload fails, the job still completes

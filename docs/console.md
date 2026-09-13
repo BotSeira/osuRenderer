@@ -4,8 +4,8 @@ osuRenderer uses Log4J2 for service and Danser output and JLine for interactive 
 
 | Command | Purpose |
 | --- | --- |
-| `status` | Web, HTTP, render-pool, job, cache, and uptime health |
-| `queue` | Active workers, queue utilization, and completed tasks |
+| `status` | Web, HTTP, render/upload pools, job, cache, and uptime health |
+| `queue` | Render and upload workers, queue utilization, and completed tasks |
 | `jobs [status]` | List tracked jobs, optionally filtered by state |
 | `job show <uuid>` | Show one render job |
 | `job delete <uuid> confirm` | Delete job metadata and its result |

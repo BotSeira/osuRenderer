@@ -82,7 +82,7 @@ public final class RendererConsoleProcessor {
         if (input.size() == 1) return Result.ok("""
                 osuRenderer administration console
                   status                              Service, HTTP, queue, job, and cache health
-                  queue                               Render worker and queue utilization
+                  queue                               Render/upload worker and queue utilization
                   jobs [status]                       List tracked jobs, optionally filtered by status
                   job show <job-id>                   Show one job
                   job delete <job-id> confirm         Delete job metadata and result
@@ -102,9 +102,9 @@ public final class RendererConsoleProcessor {
                 """.stripTrailing());
         String topic = input.value(1).toLowerCase(Locale.ROOT);
         String detail = switch (topic) {
-            case "status" -> "status\nShows the web server, HTTP counters, renderer pool, jobs, and cache.";
-            case "queue" -> "queue\nShows active workers, configured pool size, waiting jobs, and completed tasks.";
-            case "jobs" -> "jobs [queued|rendering|uploading|canceled|done|failed|timeout]\nLists tracked jobs.";
+            case "status" -> "status\nShows the web server, HTTP counters, render/upload pools, jobs, and cache.";
+            case "queue" -> "queue\nShows render/upload workers, pool sizes, waiting jobs, and completed tasks.";
+            case "jobs" -> "jobs [queued|rendering|upload_queued|uploading|canceled|done|failed|timeout]\nLists tracked jobs.";
             case "job" -> "job show <uuid>\njob delete <uuid> confirm\nDeletion removes metadata and any result file.";
             case "cache" -> "cache <query|delete|get|fetch> <score|beatmap|beatmapset|replay> <id>\nfetch must be initiated from oStella or SeiraCore because workers intentionally have no upstream credentials.\ncache status\ncache has <beatmapset|replay> <id>\ncache remove <type> <id> confirm\ncache clear <beatmapsets|replays|all> confirm";
             case "cleanup" -> "cleanup now\nRuns the configured result-TTL cleanup immediately.";
@@ -126,19 +126,23 @@ public final class RendererConsoleProcessor {
                   Web server: %s (port %d)
                   HTTP requests: %d total, %d failed
                   Render pool: %d/%d active, %d queued, %d completed
+                  Upload pool: %d/%d active, %d queued, %d completed
                   Jobs: %d tracked
                   Cache: %d beatmapsets, %d replays, %s
                   Uptime: %s
                 """.formatted(version(), status.running() ? "RUNNING" : "STOPPED", config.webserver().port(),
                 status.requests(), status.failures(), renderer.active(), renderer.poolSize(), renderer.queued(),
-                renderer.completed(), renderer.trackedJobs(), cache.beatmapsets(), cache.replays(),
+                renderer.completed(), renderer.uploadActive(), renderer.uploadPoolSize(), renderer.uploadQueued(),
+                renderer.uploadCompleted(), renderer.trackedJobs(), cache.beatmapsets(), cache.replays(),
                 bytes(cache.bytes()), duration(System.currentTimeMillis() - STARTED_AT)).stripTrailing());
     }
 
     private Result queue() {
         ReplayRenderService.ServiceStatus value = access.status().renderer();
-        return Result.ok("Active workers: %d / %d\nQueued jobs: %d / %d\nCompleted tasks: %d".formatted(
-                value.active(), value.poolSize(), value.queued(), config.renderer().renderQueueSize(), value.completed()));
+        return Result.ok(("Render workers: %d / %d\nRender queue: %d / %d\nRender tasks completed: %d\n"
+                + "Upload workers: %d / %d\nUpload queue: %d / unlimited\nUpload tasks completed: %d").formatted(
+                value.active(), value.poolSize(), value.queued(), config.renderer().renderQueueSize(), value.completed(),
+                value.uploadActive(), value.uploadPoolSize(), value.uploadQueued(), value.uploadCompleted()));
     }
 
     private Result jobs(ConsoleInputParser.ParsedInput input) {
@@ -225,6 +229,7 @@ public final class RendererConsoleProcessor {
                   renderer.cachePath = %s
                   renderer.renderThreads = %d
                   renderer.renderQueueSize = %d
+                  renderer.uploadThreads = %d
                   renderer.resultTtlMinutes = %d
                   renderer.renderTimeoutMinutes = %d
                   renderer.danserConfigPath = %s
@@ -232,6 +237,7 @@ public final class RendererConsoleProcessor {
                 """.formatted(config.webserver().port(), config.webserver().maxRequestSizeMb(),
                 renderer.apiKey().isBlank() ? "not set" : "configured (redacted)", renderer.danserPath(),
                 renderer.workPath(), renderer.cachePath(), renderer.renderThreads(), renderer.renderQueueSize(),
+                renderer.uploadThreads(),
                 renderer.resultTtlMinutes(), renderer.renderTimeoutMinutes(),
                 renderer.danserConfigPath() == null ? "not set" : renderer.danserConfigPath(),
                 renderer.danserRuntime() == null || renderer.danserRuntime().envVars() == null

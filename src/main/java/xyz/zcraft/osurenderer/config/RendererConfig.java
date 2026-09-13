@@ -8,6 +8,7 @@ public record RendererConfig(
         String cachePath,
         int renderQueueSize,
         int renderThreads,
+        int uploadThreads,
         int resultTtlMinutes,
         int renderTimeoutMinutes,
         String danserConfigPath
@@ -21,6 +22,7 @@ public record RendererConfig(
                 : cachePath;
         renderQueueSize = renderQueueSize > 0 ? renderQueueSize : 5;
         renderThreads = renderThreads > 0 ? renderThreads : 1;
+        uploadThreads = uploadThreads > 0 ? uploadThreads : 1;
         resultTtlMinutes = resultTtlMinutes > 0 ? resultTtlMinutes : 15;
         renderTimeoutMinutes = renderTimeoutMinutes > 0 ? renderTimeoutMinutes : 10;
         danserConfigPath = null;

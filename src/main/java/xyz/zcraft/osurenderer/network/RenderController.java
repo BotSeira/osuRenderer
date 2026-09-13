@@ -265,8 +265,11 @@ public final class RenderController {
 
     public void overview(Context context) {
         JsonObject response = new JsonObject();
-        response.addProperty("queue", service.queueSize());
-        response.addProperty("active", service.activeCount());
+        ReplayRenderService.ServiceStatus status = service.status();
+        response.addProperty("queue", status.queued());
+        response.addProperty("active", status.active());
+        response.addProperty("uploadQueue", status.uploadQueued());
+        response.addProperty("uploadActive", status.uploadActive());
         context.contentType("application/json").result(response.toString());
     }
 

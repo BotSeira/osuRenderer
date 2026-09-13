@@ -18,6 +18,8 @@ renderer:
   # Maximum number of waiting jobs; running jobs are not counted.
   renderQueueSize: 5
   renderThreads: 1
+  # Number of concurrent QQ uploads. The upload waiting queue is unlimited.
+  uploadThreads: 1
   resultTtlMinutes: 15
   renderTimeoutMinutes: 10
   # Config file to use for rendering. Will be merged with the config sent by oStella.
