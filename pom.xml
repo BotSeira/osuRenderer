@@ -6,7 +6,7 @@
 
     <groupId>com.github.BotSeira</groupId>
     <artifactId>osuRenderer</artifactId>
-    <version>1.1.1</version>
+    <version>1.2.0</version>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>
@@ -65,6 +65,11 @@
     </build>
 
     <dependencies>
+        <dependency>
+            <groupId>com.github.BotSeira</groupId>
+            <artifactId>osuModel</artifactId>
+            <version>1.0.10-SNAPSHOT</version>
+        </dependency>
         <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>

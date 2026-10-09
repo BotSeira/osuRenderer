@@ -1,5 +1,7 @@
 package xyz.zcraft.osurenderer.network;
 
+import xyz.zcraft.osu.model.ModSettings;
+
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.javalin.http.Context;
@@ -60,14 +62,7 @@ public final class RenderController {
     }
 
     private static String parseMods(String value) {
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-        String mods = value.trim().toUpperCase(Locale.ROOT);
-        if (!mods.matches("(?:[A-Z0-9]{2})*")) {
-            throw new IllegalArgumentException("mods must contain two-character acronyms");
-        }
-        return mods;
+        return ModSettings.format(ModSettings.parse(value));
     }
 
     private static double parseOptionalDouble(String value) {

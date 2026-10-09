@@ -39,6 +39,9 @@ class RendererConsoleProcessorTest {
         String output = fixture.processor.execute("config show").message();
         assertFalse(output.contains("renderer-api-secret"));
         assertTrue(output.contains("redacted"));
+        assertTrue(output.contains("renderer.uploadThreads = 1"));
+        assertTrue(fixture.processor.execute("queue").message().contains("Upload queue: 0 / unlimited"));
+        assertTrue(fixture.processor.execute("jobs upload_queued").message().contains(JOB_ID));
         assertFalse(fixture.processor.execute("cache clear all").success());
         assertTrue(fixture.processor.execute("cache clear all confirm").success());
         assertEquals(RenderAssetCache.CacheSelection.ALL, fixture.access.cleared);
@@ -60,7 +63,7 @@ class RendererConsoleProcessorTest {
     private Fixture fixture() {
         AppConfig config = new AppConfig(
                 new RendererConfig("renderer-api-secret", "danser", new DanserRuntimeConfig(Map.of("SECRET", "value"), "", ""),
-                        "data", "data/cache", 5, 2, 15, 10, null),
+                        "data", "data/cache", 5, 2, 1, 15, 10, null),
                 new WebserverConfig(8722, 512)
         );
         FakeAccess access = new FakeAccess();
@@ -71,11 +74,12 @@ class RendererConsoleProcessorTest {
 
     private static final class FakeAccess implements RendererConsoleAccess {
         private final CountDownLatch stopped = new CountDownLatch(1);
-        private final JobProgress job = new JobProgress(JOB_ID, JobStatus.DONE);
+        private final JobProgress job = new JobProgress(JOB_ID, JobStatus.UPLOAD_QUEUED);
         private RenderAssetCache.CacheSelection cleared;
         @Override public WebServer.ServerStatus status() {
             return new WebServer.ServerStatus(true, 10, 1,
-                    new ReplayRenderService.ServiceStatus(0, 0, 2, 3, 1, Map.of(JobStatus.DONE, 1L)));
+                    new ReplayRenderService.ServiceStatus(0, 0, 2, 3, 0, 0, 1, 4,
+                            1, Map.of(JobStatus.UPLOAD_QUEUED, 1L)));
         }
         @Override public List<JobProgress> listJobs() { return List.of(job); }
         @Override public JobProgress getJob(String jobId) { return job; }

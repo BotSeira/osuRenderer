@@ -1,5 +1,7 @@
 package xyz.zcraft.osurenderer.service;
 
+import xyz.zcraft.osu.model.ModSettings;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.apache.logging.log4j.LogManager;
@@ -438,7 +440,16 @@ public final class ReplayRenderService implements Closeable {
                 arguments.add("-end=" + request.end());
             }
             arguments.add("-id=" + request.beatmapId());
-            arguments.add("-mods=AT" + Objects.requireNonNullElse(request.mods(), ""));
+            var mods = ModSettings.parse(request.mods());
+            if (mods.stream().anyMatch(mod -> mod.getSettings() != null && !mod.getSettings().isEmpty())) {
+                var json = new com.google.gson.Gson().toJsonTree(mods).getAsJsonArray();
+                JsonObject autoplay = new JsonObject();
+                autoplay.addProperty("acronym", "AT");
+                if (mods.stream().noneMatch(mod -> "AT".equals(mod.getAcronym()))) json.add(autoplay);
+                arguments.add("-mods2=" + json);
+            } else {
+                arguments.add("-mods=AT" + ModSettings.format(mods));
+            }
         }
         return arguments;
     }
